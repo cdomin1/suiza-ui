@@ -618,6 +618,19 @@ struct DocumentTab {
     history: Vec<Document>,
     redo: Vec<Document>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedSession {
+    tabs: Vec<SavedSessionTab>,
+    active: usize,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedSessionTab {
+    doc: Document,
+    saved: Document,
+    path: Option<std::path::PathBuf>,
+    page: usize,
+    board: usize,
+}
 struct Studio {
     doc: Document,
     page: usize,
@@ -857,8 +870,7 @@ impl Studio {
                                         {
                                             switch = Some(i);
                                         }
-                                        if ui
-                                            .small_button("×")
+                                        if close_icon_button(ui, 24.0)
                                             .on_hover_text("Close document")
                                             .clicked()
                                         {
@@ -890,22 +902,37 @@ impl Studio {
         }
         if let Some(i) = self.closing_tab {
             egui::Window::new("Unsaved changes")
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
+                .default_width(360.0)
+                .frame(egui::Frame::window(&ctx.style()).inner_margin(24))
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(12.0, 12.0);
+                    ui.label(egui::RichText::new("Unsaved changes").size(18.0).strong());
                     ui.label("Save this document before closing?");
+                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
+                        if ui
+                            .add_sized([72.0, 32.0], egui::Button::new("Save"))
+                            .clicked()
+                        {
                             self.save();
                             if self.doc == self.saved_document {
                                 self.close_tab(i);
                             }
                         }
-                        if ui.button("Discard changes").clicked() {
+                        if ui
+                            .add_sized([136.0, 32.0], egui::Button::new("Discard changes"))
+                            .clicked()
+                        {
                             self.close_tab(i);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui
+                            .add_sized([80.0, 32.0], egui::Button::new("Cancel"))
+                            .clicked()
+                        {
                             self.closing_tab = None;
                         }
                     });
@@ -968,6 +995,9 @@ impl Studio {
         visuals.widgets.hovered.fg_stroke.color = visuals.widgets.inactive.fg_stroke.color;
         visuals.widgets.active.fg_stroke.color = visuals.widgets.inactive.fg_stroke.color;
         visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(7);
+        visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(7);
+        visuals.widgets.active.corner_radius = egui::CornerRadius::same(7);
+        visuals.widgets.open.corner_radius = egui::CornerRadius::same(7);
         visuals.widgets.inactive.bg_stroke = Stroke::NONE;
         visuals.widgets.hovered.bg_stroke = Stroke::NONE;
         visuals.selection.bg_fill = if dark {
@@ -1072,199 +1102,149 @@ impl Studio {
             });
     }
     fn show_welcome(&mut self, ctx: &egui::Context) {
-        let mut open = self.welcome;
-        egui::Window::new("Welcome to Suiza-UI")
-            .open(&mut open)
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
+        let screen = ctx.screen_rect();
+        let width = (screen.width() - 64.0).clamp(540.0, 1080.0);
+        let height = (screen.height() - 90.0).clamp(360.0, 700.0);
+        let mut section = ctx
+            .data(|d| d.get_temp::<usize>(egui::Id::new("welcome_section")))
+            .unwrap_or(0);
+        let mut custom = ctx
+            .data(|d| d.get_temp::<[f32; 2]>(egui::Id::new("welcome_size")))
+            .unwrap_or([600.0, 500.0]);
+        let mut chosen = None;
+        let mut new_size = None;
+        let mut template = false;
+        let mut open_file = false;
+        egui::Window::new("Suiza-UI Home")
+            .title_bar(false).collapsible(false).resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .default_width(620.0)
-            .frame(
-                egui::Frame::window(&ctx.style())
-                    .fill(ctx.style().visuals.panel_fill)
-                    .corner_radius(18)
-                    .inner_margin(20),
-            )
+            .frame(egui::Frame::window(&ctx.style()).fill(ctx.style().visuals.panel_fill).corner_radius(16).inner_margin(0))
             .show(ctx, |ui| {
-                ui.set_width(600.0);
-                ui.set_max_width(600.0);
-                let (header, _) = ui.allocate_exact_size(Vec2::new(600.0, 32.0), Sense::hover());
-                ui.painter().text(
-                    header.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Welcome to Suiza-UI",
-                    egui::FontId::proportional(20.0),
-                    ui.visuals().text_color(),
-                );
-                if ui
-                    .put(
-                        Rect::from_center_size(
-                            header.right_center() - Vec2::new(12.0, 0.0),
-                            Vec2::splat(24.0),
-                        ),
-                        egui::Button::new("×").frame(false),
-                    )
-                    .on_hover_text("Close")
-                    .clicked()
-                {
-                    self.welcome = false;
-                }
-                ui.add_space(18.0);
-                ui.horizontal(|ui| {
-                    section_heading(ui, "Your documents");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.welcome_search)
-                                .hint_text("Search recent files")
-                                .desired_width(200.0),
-                        );
+                ui.set_width(width);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
+                egui::Frame::new().inner_margin(20).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Suiza-UI").size(20.0).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if close_icon_button(ui, 28.0).on_hover_text("Return to editor").clicked() { self.welcome = false; }
+                        });
                     });
                 });
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    for (title, subtitle, blank) in [
-                        ("Atelier", "Editorial website template", false),
-                        ("Blank document", "Start from an empty canvas", true),
-                    ] {
-                        egui::Frame::new()
-                            .fill(ui.visuals().widgets.inactive.bg_fill)
-                            .corner_radius(12)
-                            .inner_margin(16)
-                            .show(ui, |ui| {
-                                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                                    ui.set_width(260.0);
-                                    ui.set_max_width(260.0);
-                                    let (rect, preview) = ui.allocate_exact_size(
-                                        Vec2::new(260.0, 120.0),
-                                        if blank {
-                                            Sense::hover()
-                                        } else {
-                                            Sense::click()
-                                        },
-                                    );
-                                    if blank {
-                                        ui.painter().rect_filled(
-                                            rect.shrink(10.0),
-                                            8.0,
-                                            Color32::WHITE,
-                                        );
-                                    } else {
-                                        paint_artboard(
-                                            &ui.painter().with_clip_rect(rect),
-                                            rect.center() - Vec2::new(640.0, 440.0) * 0.25 / 2.0,
-                                            0.25,
-                                            &Document::default().pages[0].artboards[0],
-                                        );
-                                    }
-                                    let title_clicked = if blank {
-                                        section_heading(ui, title);
-                                        false
-                                    } else {
-                                        ui.add(
-                                            egui::Button::new(egui::RichText::new(title).strong())
-                                                .frame(false),
-                                        )
-                                        .on_hover_text("Open template")
-                                        .clicked()
-                                    };
-                                    ui.label(
-                                        egui::RichText::new(subtitle)
-                                            .size(11.0)
-                                            .color(ui.visuals().weak_text_color()),
-                                    );
-                                    let create_blank = blank
-                                        && ui
-                                            .add_sized(
-                                                [260.0, 28.0],
-                                                egui::Button::new("Create document"),
-                                            )
-                                            .clicked();
-                                    if create_blank
-                                        || (!blank && (preview.clicked() || title_clicked))
-                                    {
-                                        self.open_in_tab(Document::default(), None);
-                                        if blank {
-                                            self.doc = Document {
-                                                prototype: prototype::Prototype::default(),
-                                                name: "Untitled".into(),
-                                                pages: vec![Page {
-                                                    name: "Designs".into(),
-                                                    artboards: vec![Artboard {
-                                                        prototype_id: String::new(),
-                                                        frame: FrameStyle::default(),
-                                                        name: "Artboard 1".into(),
-                                                        layers: vec![],
-                                                    }],
-                                                }],
-                                            };
-                                        }
-                                        self.page = 0;
-                                        self.artboard = 0;
-                                        self.reset_selection();
-                                        self.saved_document = self.doc.clone();
-                                        self.welcome = false;
-                                    }
-                                });
+                ui.horizontal_top(|ui| {
+                    egui::Frame::new().fill(ui.visuals().extreme_bg_color).inner_margin(20).show(ui, |ui| {
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_width(130.0);
+                        ui.set_min_height(height - 105.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 12.0);
+                        if ui.add_sized([130.0, 30.0], egui::Button::new(egui::RichText::new("New file").color(Color32::WHITE)).fill(ACCENT).stroke(Stroke::NONE)).clicked() { new_size = Some([640.0, 440.0]); }
+                        if ui.add_sized([130.0, 30.0], egui::Button::new("Open…").frame(false)).clicked() { open_file = true; }
+                        ui.add_space(14.0);
+                        for (i, label) in ["Home", "Your files", "Templates"].iter().enumerate() {
+                            if ui.add_sized([130.0, 30.0], egui::Button::new(egui::RichText::new(*label).color(if section == i { Color32::WHITE } else { ui.visuals().text_color() })).fill(if section == i { ACCENT } else { ui.visuals().widgets.inactive.bg_fill }).stroke(Stroke::NONE)).clicked() { section = i; }
+                        }
+                        ui.add_space(24.0);
+                        ui.label(egui::RichText::new("LOCAL WORKSPACE").size(9.0).color(ui.visuals().weak_text_color()));
+                        ui.label(egui::RichText::new("Your files stay on your device.").size(11.0).color(ui.visuals().weak_text_color()));
+                        });
+                    });
+                    egui::Frame::new().inner_margin(24).show(ui, |ui| {
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        let content_width = width - 218.0;
+                        ui.set_width(content_width);
+                        ui.spacing_mut().item_spacing = Vec2::new(16.0, 16.0);
+                        egui::ScrollArea::vertical().max_height(height - 115.0).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(match section { 1 => "Your files", 2 => "Templates", _ => "Design. Prototype. Share." }).size(18.0).strong());
                             });
-                    }
-                });
-                ui.add_space(16.0);
-                section_heading(ui, "Recent documents");
-                ui.add_space(8.0);
-                let mut chosen = None;
-                egui::ScrollArea::vertical()
-                    .max_height(160.0)
-                    .show(ui, |ui| {
-                        let files: Vec<_> = self
-                            .recent
-                            .iter()
-                            .filter(|p| {
-                                p.to_string_lossy()
-                                    .to_lowercase()
-                                    .contains(&self.welcome_search.to_lowercase())
-                            })
-                            .collect();
-                        if files.is_empty() {
-                            ui.label(
-                                egui::RichText::new("Opened and saved documents will appear here.")
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                        }
-                        for path in files {
-                            if ui
-                                .add_sized(
-                                    [580.0, 28.0],
-                                    egui::Button::new(
-                                        path.file_stem().unwrap_or_default().to_string_lossy(),
-                                    ),
-                                )
-                                .on_hover_text(path.display().to_string())
-                                .clicked()
-                            {
-                                chosen = Some(path.clone());
+                            if section == 0 {
+                                let card_width = (content_width - 48.0) / 4.0;
+                                egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(8).inner_margin(12).show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
+                                    ui.horizontal_top(|ui| {
+                                        for (i, (label, size)) in [("Phone", [390.0, 844.0]), ("Tablet", [834.0, 1194.0]), ("Web", [1920.0, 1080.0]), ("Custom size", custom)].into_iter().enumerate() {
+                                            ui.allocate_ui(Vec2::new(card_width - 6.0, 140.0), |ui| {
+                                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                                    let (rect, response) = ui.allocate_exact_size(Vec2::new(card_width - 6.0, 65.0), Sense::click());
+                                                    let icon_size = match i { 0 => Vec2::new(23.0, 43.0), 1 => Vec2::new(33.0, 43.0), _ => Vec2::new(48.0, 32.0) };
+                                                    ui.painter().rect_stroke(Rect::from_center_size(rect.center(), icon_size), 3.0, Stroke::new(1.2_f32, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
+                                                    if response.clicked() { new_size = Some(size); }
+                                                    if ui.add(egui::Button::new(egui::RichText::new(label).strong()).frame(false)).clicked() { new_size = Some(size); }
+                                                    if i == 3 {
+                                                        ui.horizontal(|ui| {
+                                                            ui.add_sized([card_width / 2.0 - 10.0, 24.0], egui::DragValue::new(&mut custom[0]).range(1.0..=4000.0).prefix("W "));
+                                                            ui.add_sized([card_width / 2.0 - 10.0, 24.0], egui::DragValue::new(&mut custom[1]).range(1.0..=4000.0).prefix("H "));
+                                                        });
+                                                    } else { ui.label(egui::RichText::new(format!("{} × {} px", size[0], size[1])).size(10.0).color(ui.visuals().weak_text_color())); }
+                                                });
+                                            });
+                                        }
+                                    });
+                                });
                             }
-                        }
+                            if section == 2 {
+                                ui.label("Start with an editable design.");
+                                let doc = Document::default();
+                                if welcome_document_card(ui, &doc, "Atelier", "Editorial website", 180.0).clicked() { template = true; }
+                            } else {
+                                ui.horizontal(|ui| {
+                                    section_heading(ui, "Recent");
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.add(egui::TextEdit::singleline(&mut self.welcome_search).hint_text("Search recent files").desired_width(180.0));
+                                    });
+                                });
+                                let files: Vec<_> = self.recent.iter().filter(|p| p.to_string_lossy().to_lowercase().contains(&self.welcome_search.to_lowercase())).cloned().collect();
+                                if files.is_empty() { ui.label(egui::RichText::new("Opened and saved documents will appear here.").color(ui.visuals().weak_text_color())); }
+                                let columns = ((content_width + 16.0) / 160.0).floor().max(1.0) as usize;
+                                let card_width = (content_width - (columns - 1) as f32 * 16.0) / columns as f32;
+                                for row in files.chunks(columns) {
+                                    ui.horizontal_top(|ui| {
+                                        for path in row {
+                                            let modified = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+                                            let id = egui::Id::new(("recent_preview", path, modified));
+                                            let doc = ctx.data(|d| d.get_temp::<Option<std::sync::Arc<Document>>>(id)).unwrap_or_else(|| {
+                                                let doc = std::fs::read_to_string(path).ok().and_then(|s| Document::from_json(&s).ok()).map(std::sync::Arc::new);
+                                                ctx.data_mut(|d| d.insert_temp(id, doc.clone()));
+                                                doc
+                                            });
+                                            let name = path.file_stem().unwrap_or_default().to_string_lossy();
+                                            if let Some(doc) = doc {
+                                                if welcome_document_card(ui, &doc, &doc.name, &name, card_width).on_hover_text(path.display().to_string()).clicked() { chosen = Some(path.clone()); }
+                                            } else {
+                                                ui.allocate_ui_with_layout(Vec2::new(card_width, 180.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                                                    if ui.add_sized([card_width, 120.0], egui::Button::new("Preview unavailable")).clicked() { chosen = Some(path.clone()); }
+                                                    ui.add_sized([card_width, 24.0], egui::Label::new(name.to_string()).truncate());
+                                                });
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                        });
                     });
-                if let Some(path) = chosen {
-                    match std::fs::read_to_string(&path)
-                        .map_err(|e| e.to_string())
-                        .and_then(|s| Document::from_json(&s))
-                    {
-                        Ok(doc) => {
-                            self.open_in_tab(doc, Some(path.clone()));
-                            self.remember_document(path);
-                            self.welcome = false;
-                        }
-                        Err(e) => self.status = format!("Open failed: {e}"),
-                    }
-                }
-                ui.add_space(12.0);
-                if ui.button("Open local document…").clicked() {
-                    self.open();
-                }
+                });
             });
-        self.welcome = self.welcome && open;
+        ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("welcome_section"), section);
+            d.insert_temp(egui::Id::new("welcome_size"), custom);
+        });
+        if open_file {
+            self.open();
+        }
+        if let Some(path) = chosen {
+            self.open_path(path);
+        }
+        if template {
+            self.open_in_tab(Document::default(), None);
+            self.welcome = false;
+        }
+        if let Some(size) = new_size {
+            self.apply_action(Action::New, ctx);
+            self.doc.pages[0].artboards[0].frame.width = size[0];
+            self.doc.pages[0].artboards[0].frame.height = size[1];
+            self.saved_document = self.doc.clone();
+            self.welcome = false;
+        }
     }
     fn record_change(&mut self, before: Document) {
         self.redo.clear();
@@ -1503,6 +1483,66 @@ impl Studio {
         self.resize_corner = None;
         self.pan = Vec2::ZERO;
     }
+    fn session_json(&mut self) -> Result<String, String> {
+        self.ensure_tabs();
+        self.tabs[self.active_tab] = self.tab_snapshot();
+        serde_json::to_string(&SavedSession {
+            active: self.active_tab,
+            tabs: self
+                .tabs
+                .iter()
+                .map(|t| SavedSessionTab {
+                    doc: t.doc.clone(),
+                    saved: t.saved.clone(),
+                    path: t.path.clone(),
+                    page: t.page,
+                    board: t.board,
+                })
+                .collect(),
+        })
+        .map_err(|e| e.to_string())
+    }
+    fn restore_session(&mut self, json: &str) -> Result<(), String> {
+        let session: SavedSession = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        if session.tabs.is_empty() {
+            return Err("Empty saved session".into());
+        }
+        // Validate every document before touching the current session.
+        for t in &session.tabs {
+            Document::from_json(&serde_json::to_string(&t.doc).map_err(|e| e.to_string())?)?;
+            Document::from_json(&serde_json::to_string(&t.saved).map_err(|e| e.to_string())?)?;
+        }
+        self.tabs.clear();
+        for t in session.tabs {
+            self.doc = t.doc;
+            self.saved_document = t.saved;
+            self.document_path = t.path;
+            self.page = t.page;
+            self.artboard = t.board;
+            self.reset_selection();
+            self.history.clear();
+            self.redo.clear();
+            self.tabs.push(self.tab_snapshot());
+        }
+        self.active_tab = self.tabs.len() - 1;
+        let active = session.active.min(self.active_tab);
+        self.switch_tab(active);
+        self.welcome = false;
+        self.status = "Previous session restored".into();
+        Ok(())
+    }
+    fn save_to_path(&mut self, path: std::path::PathBuf) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(&self.doc).map_err(|e| e.to_string())?;
+        // A failed write must not truncate an existing document or mark it saved.
+        write_document_atomic(&path, &bytes)?;
+        self.document_path = Some(path.clone());
+        self.saved_document = self.doc.clone();
+        self.remember_document(path);
+        self.ensure_tabs();
+        self.tabs[self.active_tab] = self.tab_snapshot();
+        self.status = "Document saved".into();
+        Ok(())
+    }
     fn save(&mut self) {
         if let Some(path) = self.document_path.clone().or_else(|| {
             rfd::FileDialog::new()
@@ -1510,18 +1550,23 @@ impl Studio {
                 .set_file_name(format!("{}.json", self.doc.name))
                 .save_file()
         }) {
-            match serde_json::to_string_pretty(&self.doc)
-                .map_err(|e| e.to_string())
-                .and_then(|s| std::fs::write(&path, s).map_err(|e| e.to_string()))
-            {
-                Ok(()) => {
-                    self.document_path = Some(path.clone());
-                    self.saved_document = self.doc.clone();
-                    self.remember_document(path);
-                    self.status = "Document saved".into();
-                }
-                Err(e) => self.status = format!("Save failed: {e}"),
+            if let Err(e) = self.save_to_path(path) {
+                self.status = format!("Save failed: {e}");
             }
+        }
+    }
+    fn open_path(&mut self, path: std::path::PathBuf) {
+        match std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|s| Document::from_json(&s))
+        {
+            Ok(doc) => {
+                self.open_in_tab(doc, Some(path.clone()));
+                self.remember_document(path);
+                self.welcome = false;
+                self.status = "Document opened".into();
+            }
+            Err(e) => self.status = format!("Open failed: {e}"),
         }
     }
     fn open(&mut self) {
@@ -1529,18 +1574,7 @@ impl Studio {
             .add_filter("Suiza-UI document", &["json"])
             .pick_file()
         {
-            match std::fs::read_to_string(&path)
-                .map_err(|e| e.to_string())
-                .and_then(|s| Document::from_json(&s))
-            {
-                Ok(doc) => {
-                    self.open_in_tab(doc, Some(path.clone()));
-                    self.remember_document(path);
-                    self.welcome = false;
-                    self.status = "Document opened".into();
-                }
-                Err(e) => self.status = format!("Open failed: {e}"),
-            }
+            self.open_path(path);
         }
     }
 }
@@ -1990,7 +2024,7 @@ impl Studio {
             self.reset_selection();
         }
         egui::SidePanel::right("inspector")
-            .exact_width(240.0)
+            .exact_width(264.0)
             .resizable(false)
             .frame(
                 egui::Frame::new()
@@ -2160,7 +2194,7 @@ impl Studio {
                             ui.add_space(8.0);
                             section_heading(ui, "Type");
                             ui.add_space(6.0);
-                            type_controls(ui, layer);
+                            ui.scope(|ui| type_controls(ui, layer));
                         } else {
                             ui.add(
                                 egui::TextEdit::singleline(&mut layer.name).desired_width(210.0),
@@ -2300,7 +2334,10 @@ impl Studio {
                                     [42.0, 24.0],
                                     egui::DragValue::new(&mut effect.amount).range(0.0..=100.0),
                                 );
-                                if ui.small_button("×").clicked() {
+                                if close_icon_button(ui, 24.0)
+                                    .on_hover_text("Remove effect")
+                                    .clicked()
+                                {
                                     remove = Some(i);
                                 }
                             });
@@ -3101,6 +3138,7 @@ impl eframe::App for Studio {
         let _ = (ctx, raw);
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.request_repaint_after(std::time::Duration::from_secs(5));
         let mut used: Vec<String> = self
             .doc
             .pages
@@ -3124,11 +3162,19 @@ impl eframe::App for Studio {
         #[cfg(target_os = "macos")]
         {
             let mut actions = Vec::new();
+            let mut recent_actions = Vec::new();
+            if let Some(menu) = &mut self.native_menu {
+                menu.sync_recent(&self.recent);
+            }
             if let Some(menu) = &self.native_menu {
                 while let Ok(id) = menu.events.try_recv() {
                     if let Some((_, action)) = menu.items.iter().find(|(item, _)| item.id() == &id)
                     {
                         actions.push(*action);
+                    } else if let Some((_, path)) =
+                        menu.recent_items.iter().find(|(item, _)| item.id() == &id)
+                    {
+                        recent_actions.push(path.clone());
                     }
                 }
                 for (item, action) in &menu.items {
@@ -3137,6 +3183,13 @@ impl eframe::App for Studio {
             }
             for action in actions {
                 self.apply_action(action, ctx);
+            }
+            for path in recent_actions {
+                if let Some(path) = path {
+                    self.open_path(path);
+                } else {
+                    self.recent.clear();
+                }
             }
         }
         self.apply_theme(ctx);
@@ -3167,7 +3220,13 @@ impl eframe::App for Studio {
             self.show_welcome(ctx);
         }
     }
+    fn auto_save_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(5)
+    }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Ok(json) = self.session_json() {
+            storage.set_string("suiza_session_v1", json);
+        }
         if let Ok(json) = serde_json::to_string(&self.swatches) {
             storage.set_string("suiza_swatches", json);
         }
@@ -3189,6 +3248,7 @@ enum Action {
     Open,
     Save,
     SaveAs,
+    Quit,
     BoardDuplicate,
     BoardCopy,
     BoardCut,
@@ -3950,6 +4010,7 @@ impl Studio {
             }
             Action::Open => self.open(),
             Action::Save => self.save(),
+            Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Action::CloseTab => {
                 self.ensure_tabs();
                 if self.doc != self.saved_document {
@@ -4357,6 +4418,8 @@ impl Studio {
     }
     fn menus(&mut self, ctx: &egui::Context) {
         let mut action = None;
+        let mut recent_action = None;
+        let mut clear_recent = false;
         if !cfg!(target_os = "macos") {
             egui::TopBottomPanel::top("menus")
                 .exact_height(30.0)
@@ -4380,6 +4443,37 @@ impl Studio {
                                                 a,
                                                 &mut action,
                                             );
+                                            if matches!(a, Action::Open) {
+                                                ui.menu_button("Open Recent", |ui| {
+                                                    if self.recent.is_empty() {
+                                                        ui.add_enabled(
+                                                            false,
+                                                            egui::Button::new(
+                                                                "No Recent Documents",
+                                                            ),
+                                                        );
+                                                    }
+                                                    for path in &self.recent {
+                                                        if ui
+                                                            .button(path.display().to_string())
+                                                            .clicked()
+                                                        {
+                                                            recent_action = Some(path.clone());
+                                                            ui.close_menu();
+                                                        }
+                                                    }
+                                                    if !self.recent.is_empty() {
+                                                        ui.separator();
+                                                        if ui
+                                                            .button("Clear Recent Documents")
+                                                            .clicked()
+                                                        {
+                                                            clear_recent = true;
+                                                            ui.close_menu();
+                                                        }
+                                                    }
+                                                });
+                                            }
                                         }
                                     };
                                     if let Some(title) = title {
@@ -4395,6 +4489,12 @@ impl Studio {
         }
         if let Some(action) = action {
             self.apply_action(action, ctx);
+        }
+        if let Some(path) = recent_action {
+            self.open_path(path);
+        }
+        if clear_recent {
+            self.recent.clear();
         }
         for (_, commands) in menu_groups() {
             for (_, a, key) in commands {
@@ -4504,6 +4604,7 @@ impl Studio {
         }
         if self.help {
             let popup = egui::Window::new("Keyboard shortcuts")
+                .frame(egui::Frame::window(&ctx.style()).inner_margin(20))
                 .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
@@ -5101,15 +5202,152 @@ fn paint_artboard(p: &egui::Painter, origin: Pos2, zoom: f32, board: &Artboard) 
     }
 }
 
+fn welcome_document_card(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    title: &str,
+    subtitle: &str,
+    width: f32,
+) -> egui::Response {
+    ui.allocate_ui_with_layout(
+        Vec2::new(width, 180.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing.y = 8.0;
+            let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 120.0), Sense::click());
+            ui.painter()
+                .rect_filled(rect, 8.0, ui.visuals().widgets.inactive.bg_fill);
+            if let Some(board) = doc.pages.first().and_then(|p| p.artboards.first()) {
+                let scale = ((width - 20.0) / board.frame.width).min(100.0 / board.frame.height);
+                let origin =
+                    rect.center() - Vec2::new(board.frame.width, board.frame.height) * scale / 2.0;
+                paint_artboard(
+                    &ui.painter().with_clip_rect(rect.shrink(8.0)),
+                    origin,
+                    scale,
+                    board,
+                );
+            }
+            let title_response = ui.add_sized(
+                [width, 24.0],
+                egui::Button::new(egui::RichText::new(title).strong())
+                    .frame(false)
+                    .truncate(),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(subtitle)
+                        .size(10.0)
+                        .color(ui.visuals().weak_text_color()),
+                )
+                .truncate(),
+            );
+            response.union(title_response)
+        },
+    )
+    .inner
+}
+
+/// A consistent circular rollover target for every app-owned close icon.
+fn close_icon_button(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    let visuals = ui.style().interact(&response);
+    if response.hovered() || response.is_pointer_button_down_on() || response.has_focus() {
+        ui.painter()
+            .circle_filled(rect.center(), size * 0.5, visuals.bg_fill);
+    }
+    let half = 3.5;
+    let center = rect.center();
+    let stroke = egui::Stroke::new(1.4_f32, visuals.fg_stroke.color);
+    ui.painter().line_segment(
+        [
+            center + egui::vec2(-half, -half),
+            center + egui::vec2(half, half),
+        ],
+        stroke,
+    );
+    ui.painter().line_segment(
+        [
+            center + egui::vec2(-half, half),
+            center + egui::vec2(half, -half),
+        ],
+        stroke,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn type_segments(
+    ui: &mut egui::Ui,
+    width: f32,
+    labels: &[&str],
+    tips: &[&str],
+    selected: &mut usize,
+) {
+    egui::Frame::new()
+        .fill(ui.visuals().widgets.inactive.bg_fill)
+        .corner_radius(7)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.horizontal(|ui| {
+                for (i, label) in labels.iter().enumerate() {
+                    let (rect, response) = ui.allocate_exact_size(
+                        Vec2::new(width / labels.len() as f32, 28.0),
+                        Sense::click(),
+                    );
+                    let active = *selected == i;
+                    if active || response.hovered() {
+                        ui.painter().rect_filled(
+                            rect.shrink(1.0),
+                            7.0,
+                            if active {
+                                ACCENT
+                            } else {
+                                ui.visuals().widgets.hovered.bg_fill
+                            },
+                        );
+                    }
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        *label,
+                        egui::FontId::proportional(13.0),
+                        if active {
+                            Color32::WHITE
+                        } else {
+                            ui.visuals().text_color()
+                        },
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            true,
+                            active,
+                            tips[i],
+                        )
+                    });
+                    if response.on_hover_text(tips[i]).clicked() {
+                        *selected = i;
+                    }
+                }
+            });
+        });
+}
+
 fn type_controls(ui: &mut egui::Ui, layer: &mut Layer) {
     fonts::family_picker(
         ui,
         &mut layer.typography.family,
         &mut layer.typography.monospace,
     );
+    let width = ui.available_width();
+    let gap = 8.0;
+    ui.spacing_mut().item_spacing.y = 10.0;
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        ui.spacing_mut().button_padding.y = 7.0;
         egui::ComboBox::from_id_salt("font_weight")
-            .width(100.0)
+            .width(width * 0.65 - gap)
             .selected_text(match (layer.typography.bold, layer.typography.italic) {
                 (true, true) => "Bold Italic",
                 (true, false) => "Bold",
@@ -5141,7 +5379,7 @@ fn type_controls(ui: &mut egui::Ui, layer: &mut Layer) {
             .unwrap_or((layer.height * 0.65).min(48.0));
         if ui
             .add_sized(
-                [100.0, 26.0],
+                [width * 0.35, 28.0],
                 egui::DragValue::new(&mut size)
                     .range(1.0..=240.0)
                     .prefix("aA ")
@@ -5153,8 +5391,10 @@ fn type_controls(ui: &mut egui::Ui, layer: &mut Layer) {
         }
     });
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        let field = (width - gap * 2.0) / 3.0;
         ui.add_sized(
-            [103.0, 26.0],
+            [field, 28.0],
             egui::DragValue::new(&mut layer.typography.tracking)
                 .range(-10.0..=40.0)
                 .speed(0.1)
@@ -5171,7 +5411,7 @@ fn type_controls(ui: &mut egui::Ui, layer: &mut Layer) {
         );
         if ui
             .add_sized(
-                [103.0, 26.0],
+                [field, 28.0],
                 egui::DragValue::new(&mut line)
                     .range(1.0..=400.0)
                     .prefix("↕ ")
@@ -5182,6 +5422,14 @@ fn type_controls(ui: &mut egui::Ui, layer: &mut Layer) {
         {
             layer.typography.line_height = Some(line);
         }
+        ui.add_sized(
+            [field, 28.0],
+            egui::DragValue::new(&mut layer.typography.baseline)
+                .range(-200.0..=200.0)
+                .prefix("B ")
+                .max_decimals(1),
+        )
+        .on_hover_text("Baseline offset");
     });
     egui::Frame::new()
         .fill(ui.visuals().widgets.inactive.bg_fill)
@@ -5190,7 +5438,8 @@ fn type_controls(ui: &mut egui::Ui, layer: &mut Layer) {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.horizontal(|ui| {
                 for i in 0..4 {
-                    let response = ui.add_sized([54.0, 26.0], egui::Button::new("").frame(false));
+                    let response =
+                        ui.add_sized([width / 4.0, 28.0], egui::Button::new("").frame(false));
                     let p = ui.painter();
                     if layer.typography.align == i {
                         p.rect_filled(response.rect.shrink(1.0), 7.0, ACCENT);
@@ -5223,23 +5472,63 @@ fn type_controls(ui: &mut egui::Ui, layer: &mut Layer) {
                 }
             });
         });
+    type_segments(
+        ui,
+        width,
+        &["↑", "↕", "↓"],
+        &["Align top", "Center vertically", "Align bottom"],
+        &mut layer.typography.vertical,
+    );
     ui.horizontal(|ui| {
-        for (i, label) in ["Top", "Middle", "Bottom"].iter().enumerate() {
-            ui.selectable_value(&mut layer.typography.vertical, i, *label);
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut layer.typography.transformation, 0, "Aa");
-        ui.selectable_value(&mut layer.typography.transformation, 1, "AA");
-        ui.selectable_value(&mut layer.typography.transformation, 2, "aa");
-        ui.toggle_value(
-            &mut layer.typography.underline,
-            egui::RichText::new("U").underline(),
+        ui.spacing_mut().item_spacing.x = gap;
+        let mut transformation = layer.typography.transformation as usize;
+        type_segments(
+            ui,
+            width * 0.65,
+            &["Aa", "AA", "aa"],
+            &["Original case", "Uppercase", "Lowercase"],
+            &mut transformation,
         );
-        ui.toggle_value(
-            &mut layer.typography.strike,
-            egui::RichText::new("S").strikethrough(),
-        );
+        layer.typography.transformation = transformation as u8;
+        let toggle_width = (width * 0.35 - gap * 2.0) / 2.0;
+        ui.add_sized(
+            [toggle_width, 28.0],
+            egui::Button::new(egui::RichText::new("Aa").underline().color(
+                if layer.typography.underline {
+                    Color32::WHITE
+                } else {
+                    ui.visuals().text_color()
+                },
+            ))
+            .fill(if layer.typography.underline {
+                ACCENT
+            } else {
+                ui.visuals().widgets.inactive.bg_fill
+            })
+            .stroke(Stroke::NONE),
+        )
+        .on_hover_text("Underline")
+        .clicked()
+        .then(|| layer.typography.underline = !layer.typography.underline);
+        ui.add_sized(
+            [toggle_width, 28.0],
+            egui::Button::new(egui::RichText::new("Aa").strikethrough().color(
+                if layer.typography.strike {
+                    Color32::WHITE
+                } else {
+                    ui.visuals().text_color()
+                },
+            ))
+            .fill(if layer.typography.strike {
+                ACCENT
+            } else {
+                ui.visuals().widgets.inactive.bg_fill
+            })
+            .stroke(Stroke::NONE),
+        )
+        .on_hover_text("Strikethrough")
+        .clicked()
+        .then(|| layer.typography.strike = !layer.typography.strike);
     });
     ui.collapsing("Advanced typography", |ui| {
         let mut kerning = layer.typography.kerning.unwrap_or(true);
@@ -5924,10 +6213,60 @@ fn image_pdf(jpeg: &[u8], width: u32, height: u32) -> Vec<u8> {
     bytes
 }
 
+fn write_document_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let name = path
+        .file_name()
+        .ok_or("Missing document filename")?
+        .to_string_lossy();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let temporary = parent.join(format!(".{name}.{}.{}.tmp", std::process::id(), stamp));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        #[cfg(not(target_os = "windows"))]
+        std::fs::rename(&temporary, path)?;
+        #[cfg(target_os = "windows")]
+        {
+            let backup = parent.join(format!(".{name}.{stamp}.backup"));
+            let existed = path.exists();
+            if existed {
+                std::fs::rename(path, &backup)?;
+            }
+            if let Err(error) = std::fs::rename(&temporary, path) {
+                if existed {
+                    let _ = std::fs::rename(&backup, path);
+                }
+                return Err(error);
+            }
+            if existed {
+                let _ = std::fs::remove_file(backup);
+            }
+        }
+        Ok::<(), std::io::Error>(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|e| e.to_string())
+}
+
 fn inspector_popover_position(ctx: &egui::Context, width: f32, height: f32, top: f32) -> Pos2 {
     let screen = ctx.screen_rect();
     Pos2::new(
-        (screen.right() - 240.0 - width).max(screen.left()),
+        (screen.right() - 264.0 - width).max(screen.left()),
         top.clamp(
             screen.top() + 8.0,
             (screen.bottom() - height - 8.0).max(screen.top() + 8.0),
@@ -6253,6 +6592,12 @@ fn property(ui: &mut egui::Ui, label: &str, value: &mut f32, positive: bool) {
                 }
                 ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                // The surrounding property frame owns the field background.
+                // Avoid a second, smaller rounded rectangle on hover or drag.
+                ui.visuals_mut().widgets.hovered.bg_fill = Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.active.bg_fill = Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.active.weak_bg_fill = Color32::TRANSPARENT;
                 ui.add_sized([68.0, 20.0], drag);
             });
         });
@@ -6613,6 +6958,9 @@ struct NativeMenu {
     _menu: muda::Menu,
     events: std::sync::mpsc::Receiver<muda::MenuId>,
     items: Vec<(muda::MenuItem, Action)>,
+    recent_menu: muda::Submenu,
+    recent_items: Vec<(muda::MenuItem, Option<std::path::PathBuf>)>,
+    recent_paths: Vec<std::path::PathBuf>,
 }
 #[cfg(target_os = "macos")]
 impl NativeMenu {
@@ -6625,10 +6973,12 @@ impl NativeMenu {
         app.append(&PredefinedMenuItem::hide(None))?;
         app.append(&PredefinedMenuItem::hide_others(None))?;
         app.append(&PredefinedMenuItem::separator())?;
-        app.append(&PredefinedMenuItem::quit(Some("Quit Suiza-UI")))?;
+        let quit = MenuItem::new("Quit Suiza-UI", true, "Cmd+Q".parse().ok());
+        app.append(&quit)?;
         menu.append(&app)?;
         let groups = menu_groups();
-        let mut items = Vec::new();
+        let recent_menu = Submenu::new("Open Recent", true);
+        let mut items = vec![(quit, Action::Quit)];
         for (name, commands) in groups {
             let submenu = Submenu::new(name, true);
             for (i, (title, commands)) in menu_sections(name, commands).into_iter().enumerate() {
@@ -6649,6 +6999,9 @@ impl NativeMenu {
                         let item =
                             MenuItem::new(label, true, shortcut.and_then(|s| s.parse().ok()));
                         submenu.append(&item)?;
+                        if matches!(action, Action::Open) {
+                            submenu.append(&recent_menu)?;
+                        }
                         items.push((item, action));
                     }
                 }
@@ -6665,7 +7018,35 @@ impl NativeMenu {
             _menu: menu,
             events,
             items,
+            recent_menu,
+            recent_items: Vec::new(),
+            recent_paths: Vec::new(),
         })
+    }
+    fn sync_recent(&mut self, paths: &[std::path::PathBuf]) {
+        if self.recent_paths == paths && !self.recent_items.is_empty() {
+            return;
+        }
+        while self.recent_menu.remove_at(0).is_some() {}
+        self.recent_items.clear();
+        self.recent_paths = paths.to_vec();
+        if paths.is_empty() {
+            let item = muda::MenuItem::new("No Recent Documents", false, None);
+            let _ = self.recent_menu.append(&item);
+            self.recent_items.push((item, None));
+        } else {
+            for path in paths {
+                let item = muda::MenuItem::new(path.display().to_string(), true, None);
+                let _ = self.recent_menu.append(&item);
+                self.recent_items.push((item, Some(path.clone())));
+            }
+            let _ = self
+                .recent_menu
+                .append(&muda::PredefinedMenuItem::separator());
+            let item = muda::MenuItem::new("Clear Recent Documents", true, None);
+            let _ = self.recent_menu.append(&item);
+            self.recent_items.push((item, None));
+        }
     }
 }
 
@@ -6751,6 +7132,9 @@ fn main() -> eframe::Result {
             style.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(239, 239, 244);
             style.visuals.widgets.inactive.bg_stroke = Stroke::NONE;
             style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(7);
+            style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(7);
+            style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(7);
+            style.visuals.widgets.open.corner_radius = egui::CornerRadius::same(7);
             style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(229, 225, 245);
             style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(229, 225, 245);
             style.visuals.widgets.hovered.bg_stroke = Stroke::NONE;
@@ -6779,6 +7163,12 @@ fn main() -> eframe::Result {
                 if let Some(json) = storage.get_string("suiza_recent") {
                     studio.recent = serde_json::from_str(&json).unwrap_or_default();
                 }
+                if let Some(json) = storage.get_string("suiza_session_v1") {
+                    if let Err(e) = studio.restore_session(&json) {
+                        studio.status = format!("Session recovery failed: {e}");
+                    }
+                }
+                studio.welcome = true;
             }
             cc.egui_ctx.data_mut(|d| {
                 d.insert_temp(egui::Id::new("suiza_swatches"), studio.swatches.clone())
@@ -6795,6 +7185,68 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn save_command_reopens_exact_edits_and_failed_save_stays_dirty() {
+        let ctx = egui::Context::default();
+        let mut app = Studio::default();
+        let root = std::env::temp_dir().join(format!("suiza-save-qa-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("Edited.json");
+        app.document_path = Some(path.clone());
+        app.doc.name = "Persistence QA".into();
+        app.doc.pages[0].artboards[0].layers[0].x = -73.0;
+        app.doc.pages[0].artboards[0].layers[0].label = Some("Saved layer label".into());
+        app.apply_action(Action::Save, &ctx);
+        assert_eq!(app.status, "Document saved");
+        let reopened = Document::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(reopened == app.doc);
+        let mut restarted = Studio::default();
+        restarted.open_path(path.clone());
+        assert_eq!(restarted.recent.first(), Some(&path));
+        assert!(restarted.doc == reopened);
+        assert_eq!(restarted.doc.pages[0].artboards[0].layers[0].x, -73.0);
+        restarted.doc.pages[0].artboards[0].layers[0].x = 41.0;
+        restarted.apply_action(Action::Save, &ctx);
+        assert!(
+            Document::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap() == restarted.doc
+        );
+        let saved = restarted.saved_document.clone();
+        restarted.doc.name = "Unsaved change".into();
+        assert!(restarted
+            .save_to_path(root.join("missing/failed.json"))
+            .is_err());
+        assert!(restarted.saved_document == saved);
+        assert_eq!(restarted.document_path, Some(path.clone()));
+        assert!(Document::from_json(&std::fs::read_to_string(path).unwrap()).unwrap() == saved);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn restart_restores_all_tabs_paths_and_unsaved_progress() {
+        let mut app = Studio::default();
+        app.doc.name = "First unsaved document".into();
+        app.doc.pages[0].artboards[0].layers[0].x = 51.0;
+        app.open_in_tab(
+            Document::default(),
+            Some(std::path::PathBuf::from("saved-document.json")),
+        );
+        app.doc.name = "Second document edits".into();
+        let json = app.session_json().unwrap();
+        let mut restarted = Studio::default();
+        restarted.restore_session(&json).unwrap();
+        assert_eq!(restarted.doc.name, "Second document edits");
+        assert!(restarted.doc != restarted.saved_document);
+        assert_eq!(
+            restarted.document_path,
+            Some(std::path::PathBuf::from("saved-document.json"))
+        );
+        restarted.switch_tab(0);
+        assert_eq!(restarted.doc.name, "First unsaved document");
+        assert_eq!(restarted.doc.pages[0].artboards[0].layers[0].x, 51.0);
+        assert!(restarted.document_path.is_none());
+        assert!(!restarted.welcome);
+        assert!(restarted.restore_session("broken JSON").is_err());
+        assert_eq!(restarted.doc.name, "First unsaved document");
+    }
     #[test]
     fn hex_color_input_validates_without_panicking() {
         assert_eq!(parse_hex_color("535DFF"), Some([83, 93, 255]));
@@ -6959,7 +7411,7 @@ mod tests {
                 app.canvas_bounds
             );
             assert!(
-                (app.canvas_bounds.right() - (width - 240.0)).abs() < 2.0,
+                (app.canvas_bounds.right() - (width - 264.0)).abs() < 2.0,
                 "inspector overflow: {:?}",
                 app.canvas_bounds
             );
@@ -7639,6 +8091,39 @@ mod regression_tests {
             egui::CentralPanel::default().show(ctx, |ui| type_controls(ui, &mut layer));
         });
         assert!(layer == before);
+    }
+    #[test]
+    fn home_window_stays_within_screen_at_supported_sizes() {
+        for size in [
+            Vec2::new(740.0, 540.0),
+            Vec2::new(1320.0, 860.0),
+            Vec2::new(2056.0, 1289.0),
+        ] {
+            let ctx = egui::Context::default();
+            configure_fonts(&ctx);
+            let mut app = Studio::default();
+            app.welcome = true;
+            app.recent.push(std::path::PathBuf::from(
+                "/missing/a-very-long-document-title-that-must-not-stretch-the-startup-window.json",
+            ));
+            let screen = Rect::from_min_size(Pos2::ZERO, size);
+            for _ in 0..4 {
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| app.show_welcome(ctx),
+                );
+            }
+            let bounds = ctx
+                .memory(|m| m.area_rect(egui::Id::new("Suiza-UI Home")))
+                .unwrap();
+            assert!(
+                screen.contains_rect(bounds),
+                "Home overflow: {bounds:?} in {screen:?}"
+            );
+        }
     }
     #[test]
     fn dark_theme_keeps_spacing_and_legible_foreground() {

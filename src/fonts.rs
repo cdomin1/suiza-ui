@@ -107,7 +107,7 @@ pub(super) fn family_picker(ui: &mut egui::Ui, family: &mut Option<String>, mono
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::click());
     let visuals = ui.style().interact(&response);
-    ui.painter().rect_filled(rect, 6.0, visuals.bg_fill);
+    ui.painter().rect_filled(rect, 7.0, visuals.bg_fill);
     ui.painter().text(
         rect.left_center() + egui::vec2(10.0, 0.0),
         egui::Align2::LEFT_CENTER,
