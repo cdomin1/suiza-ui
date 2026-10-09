@@ -1,0 +1,12 @@
+/target
+.DS_Store
+
+/dist
+
+/.local-snapshots
+
+# Local working documents and recovery copies are not application source.
+/Atelier.json
+/*-recovery-*.json
+.env
+.env.*

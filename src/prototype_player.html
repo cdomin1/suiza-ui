@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Suiza-UI prototype</title>
+<style>
+:root{color-scheme:light dark;font-family:system-ui,sans-serif;background:#191a1e;color:#f4f4f6}*{box-sizing:border-box}body{margin:0}button,select,input,textarea{font:inherit}button,select{border:1px solid #45464e;background:#2b2c32;color:#fff;border-radius:9px;padding:7px 12px;cursor:pointer}button:hover{background:#3a3b44}button:focus-visible,.hotspot:focus-visible{outline:3px solid #998cff;outline-offset:2px}header{height:60px;display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid #393a42}#title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}#screenName{color:#bfc0cb;font-size:13px}main{height:calc(100dvh - 60px);display:flex}#workspace{flex:1;min-width:0;display:flex;align-items:flex-start;justify-content:center;padding:22px;overflow:auto}#viewport{position:relative;overflow:auto;background:white;box-shadow:0 12px 44px #0005;max-width:100%;flex:none}#sizer{position:relative;overflow:hidden}#stage{position:absolute;overflow:hidden;transform-origin:top left} .screen{position:absolute;inset:0}.screen img{display:block;width:100%;height:100%;pointer-events:none}.hotspot{position:absolute;border:0;border-radius:0;padding:0;background:transparent;color:transparent}.hotspot:hover{background:transparent}.hints .hotspot{background:#6053ff22;outline:1px solid #6053ff77}.inspect .hotspot{outline:1px solid #6053ff55}.hotspot:hover:focus{outline:2px solid #6053ff}.overlay-dim{position:absolute;inset:0;background:#0004}.overlay{position:absolute;box-shadow:0 8px 40px #0006}aside{width:290px;border-left:1px solid #393a42;padding:16px;overflow:auto;flex:none}aside[hidden]{display:none}h2{font-size:17px;margin:0 0 12px}label{display:block;margin:10px 0 5px;color:#cccdd5;font-size:13px}textarea,input{width:100%;border:1px solid #4b4c54;border-radius:8px;background:#27282e;color:white;padding:9px}textarea{min-height:90px;resize:vertical}.note{border-top:1px solid #42434b;margin-top:14px;padding-top:12px;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.muted{font-size:12px;color:#adaeba;line-height:1.5}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#27282e;padding:12px;border-radius:8px;font-size:12px}#error{padding:30px}#error:empty{display:none}@media(max-width:650px){header{height:auto;flex-wrap:wrap}main{height:calc(100dvh - 110px)}aside{position:fixed;right:0;top:110px;bottom:0;background:#202126;z-index:10}#workspace{padding:12px}#screenName{display:none}}
+</style></head><body>
+<header><span id="title"></span><span id="screenName"></span><span id="navigation"><button id="home" title="Home screen">⌂</button> <button id="back" title="Previous screen">←</button> <select id="screens" aria-label="Screens in flow"></select></span><button id="hints">Hints</button><button id="inspect">Inspect</button><button id="notes">Notes</button><button id="fullscreen">Full screen</button></header>
+<div id="error" role="alert"></div><main><div id="workspace"><div id="viewport"><div id="sizer"><div id="stage"></div></div></div></div><aside id="panel" hidden><div id="specPanel" hidden><h2>Design specifications</h2><p class="muted">Click an object to inspect its position, size, color and typography.</p><pre id="spec"></pre><button id="copyCss">Copy CSS</button></div><div id="notePanel" hidden><h2>Review notes</h2><p class="muted">Notes are saved in this browser only. Download them to send feedback to the designer.</p><label for="author">Your name</label><input id="author" maxlength="120"><label for="message">Note for this screen</label><textarea id="message" maxlength="4000"></textarea><button id="addNote">Add note</button> <button id="downloadNotes">Download</button><div id="noteList"></div></div><button id="closePanel" style="margin-top:18px">Close panel</button></aside></main>
+<script>
+'use strict';
+const data=/*SUIZA_DATA*/;
+const $=id=>document.getElementById(id);
+const screens=new Map(data.screens.map(s=>[s.id,s]));
+const links=data.interactions;
+let current=data.flow.home, history=[],overlays=[],timers=[],scale=1,inspecting=false,hints=false,specCss='';
+const storageKey='suiza-review-'+data.flow.home;
+let notes=[];try{notes=JSON.parse(localStorage.getItem(storageKey)||'[]');if(!Array.isArray(notes))notes=[]}catch(e){}
+$('title').textContent=data.title+' · '+data.flow.name;document.title=data.title+' — Suiza-UI prototype';
+$('navigation').hidden=!data.settings.navigation;$('hints').hidden=!data.settings.hints;$('inspect').hidden=!data.settings.specs;$('notes').hidden=!data.settings.comments;$('fullscreen').hidden=!data.settings.fullscreen;
+for(const s of data.screens){const o=document.createElement('option');o.value=s.id;o.textContent=s.name;$('screens').append(o)}
+function sourceLinks(source){return links.filter(l=>l.source===source)}
+function cancelTimers(){timers.forEach(clearTimeout);timers=[]}
+function sourceScreen(source){return data.screens.find(s=>s.id===source||s.layers.some(l=>l.id===source))}
+function isActive(source){const s=sourceScreen(source);return s&&(overlays.length?s.id===overlays[overlays.length-1].target:s.id===current)}
+function clamp(v,min,max){return Math.max(min,Math.min(max,Number(v)||0))}
+function animate(el,link){if(!link||link.animation==='None'||!el.animate)return;let from={opacity:0};switch(link.animation){case 'SlideLeft':from={transform:'translateX(100%)'};break;case 'SlideRight':from={transform:'translateX(-100%)'};break;case 'SlideUp':from={transform:'translateY(100%)'};break;case 'SlideDown':from={transform:'translateY(-100%)'};break}el.animate([from,{opacity:1,transform:'translate(0,0)'}],{duration:clamp(link.duration,0,5)*1000,easing:'ease-in-out'})}
+function dispatch(link){
+ if(!isActive(link.source))return;
+ switch(link.action){
+ case 'Transition':if(screens.has(link.target)){history.push(current);current=link.target;overlays=[];render(link)}break;
+ case 'Overlay':if(screens.has(link.target)){overlays.push(link);render(link)}break;
+ case 'Previous':if(overlays.length){overlays.pop();render()}else if(history.length){current=history.pop();render()}break;
+ case 'CloseOverlay':if(overlays.length){overlays.pop();render()}break;
+ case 'Url':try{const u=new URL(link.url);if(u.protocol==='https:'||u.protocol==='http:')window.open(u.href,'_blank','noopener,noreferrer')}catch(e){}break;
+ case 'ScrollTo':$('viewport').scrollTo({top:clamp(link.scroll_y,0,8192)*scale,behavior:'smooth'});break;
+ }
+}
+function bindTriggers(el,source){
+ const available=sourceLinks(source);let start=null,suppressClick=false;
+ el.addEventListener('click',e=>{if(inspecting)return;if(suppressClick){suppressClick=false;e.stopPropagation();return}const link=available.find(l=>l.trigger==='Tap');if(link){e.stopPropagation();dispatch(link)}});
+ el.addEventListener('pointerenter',()=>{if(inspecting)return;const link=available.find(l=>l.trigger==='Hover');if(link)dispatch(link)});
+ el.addEventListener('pointerdown',e=>{start={x:e.clientX,y:e.clientY,id:e.pointerId};if(available.some(l=>l.trigger==='Drag')){el.setPointerCapture(e.pointerId);e.preventDefault()}});
+ el.addEventListener('pointerup',e=>{if(!start||inspecting)return;const moved=Math.hypot(e.clientX-start.x,e.clientY-start.y)>15;start=null;const link=available.find(l=>l.trigger==='Drag');if(moved&&link){suppressClick=true;e.stopPropagation();dispatch(link)}});
+ el.addEventListener('pointercancel',()=>{start=null});
+}
+function displaySpec(layer){const css=[`width: ${layer.width}px;`,`height: ${layer.height}px;`,`color: ${layer.color};`,layer.font?`font-family: ${JSON.stringify(layer.font)};`:'',layer.font_size?`font-size: ${layer.font_size}px;`:''].filter(Boolean).join('\n');specCss=css;$('spec').textContent=layer.name+'\n\nX: '+layer.x+' px\nY: '+layer.y+' px\n\n'+css;showPanel('spec')}
+function createScreen(screen){
+ const el=document.createElement('div');el.className='screen';el.style.width=screen.width+'px';el.style.height=screen.height+'px';
+ const image=document.createElement('img');image.src=screen.image;image.alt=screen.name;el.append(image);bindTriggers(el,screen.id);
+ for(const l of screen.layers){if(!inspecting&&!sourceLinks(l.id).some(i=>['Tap','Hover','Drag'].includes(i.trigger)))continue;
+ const hot=document.createElement('button');hot.className='hotspot';hot.setAttribute('aria-label',l.name);hot.title=hints?l.name:'';Object.assign(hot.style,{left:l.x+'px',top:l.y+'px',width:l.width+'px',height:l.height+'px'});bindTriggers(hot,l.id);hot.addEventListener('click',e=>{if(inspecting){e.stopPropagation();displaySpec(l)}});el.append(hot)}
+ return el;
+}
+function layout(){const s=screens.get(current);if(!s)return;const space=$('workspace');const available=Math.max(160,space.clientWidth-44);scale=Math.min(1,available/s.width);$('sizer').style.width=s.width*scale+'px';$('sizer').style.height=s.height*scale+'px';const viewport=$('viewport');viewport.style.width=s.width*scale+'px';viewport.style.height=Math.min(s.height*scale,Math.max(120,space.clientHeight-44))+'px';$('stage').style.width=s.width+'px';$('stage').style.height=s.height+'px';$('stage').style.transform=`scale(${scale})`;}
+function render(link){
+ cancelTimers();const screen=screens.get(current);if(!screen){$('error').textContent='This flow has no valid home screen.';return}
+ const stage=$('stage');stage.replaceChildren();stage.classList.toggle('hints',hints);stage.classList.toggle('inspect',inspecting);
+ const base=createScreen(screen);stage.append(base);if(!overlays.length)animate(base,link);
+ for(let i=0;i<overlays.length;i++){const o=overlays[i],s=screens.get(o.target);const dim=document.createElement('div');dim.className='overlay-dim';dim.addEventListener('click',()=>{overlays=overlays.slice(0,i);render()});stage.append(dim);const el=createScreen(s);el.classList.add('overlay');el.style.left=o.overlay_x+'px';el.style.top=o.overlay_y+'px';stage.append(el);if(i===overlays.length-1)animate(el,link)}
+ $('screens').value=current;$('screenName').textContent=screen.name;$('back').disabled=!history.length&&!overlays.length;layout();$('viewport').scrollTop=0;renderNotes();
+ for(const l of links.filter(l=>l.trigger==='Time'&&isActive(l.source))){timers.push(setTimeout(()=>dispatch(l),clamp(l.delay,0.1,60)*1000))}
+}
+function home(){current=data.flow.home;history=[];overlays=[];render()}
+$('home').onclick=home;$('back').onclick=()=>{if(overlays.length)overlays.pop();else if(history.length)current=history.pop();render()};$('screens').onchange=e=>{history.push(current);current=e.target.value;overlays=[];render()};
+$('hints').onclick=()=>{hints=!hints;$('hints').setAttribute('aria-pressed',String(hints));render()};
+function showPanel(kind){$('panel').hidden=false;$('specPanel').hidden=kind!=='spec';$('notePanel').hidden=kind!=='notes';layout();}
+$('inspect').onclick=()=>{inspecting=!inspecting;$('inspect').setAttribute('aria-pressed',String(inspecting));if(inspecting)showPanel('spec');else $('panel').hidden=true;render()};
+$('notes').onclick=()=>{inspecting=false;$('inspect').setAttribute('aria-pressed','false');showPanel('notes');render()};$('closePanel').onclick=()=>{$('panel').hidden=true;inspecting=false;$('inspect').setAttribute('aria-pressed','false');render()};
+$('fullscreen').onclick=()=>{if(!document.fullscreenElement)document.documentElement.requestFullscreen?.().catch(()=>{});else document.exitFullscreen?.()};
+$('copyCss').onclick=async()=>{try{await navigator.clipboard.writeText(specCss)}catch(e){const selection=window.getSelection(),range=document.createRange();range.selectNodeContents($('spec'));selection.removeAllRanges();selection.addRange(range)}};
+function renderNotes(){const list=$('noteList');list.replaceChildren();for(const n of notes.filter(n=>n.screen===current)){const card=document.createElement('div');card.className='note';const name=document.createElement('strong');name.textContent=n.author||'Reviewer';const message=document.createElement('p');message.textContent=n.message;const remove=document.createElement('button');remove.textContent='Delete';remove.onclick=()=>{notes=notes.filter(item=>item!==n);saveNotes();renderNotes()};card.append(name,message,remove);list.append(card)}}
+function saveNotes(){try{localStorage.setItem(storageKey,JSON.stringify(notes))}catch(e){$('error').textContent='Browser storage is unavailable. Download notes before closing.'}}
+$('addNote').onclick=()=>{const message=$('message').value.trim();if(!message)return;notes.push({screen:current,screenName:screens.get(current).name,author:$('author').value.trim(),message,date:new Date().toISOString()});$('message').value='';saveNotes();renderNotes()};
+$('downloadNotes').onclick=()=>{const blob=new Blob([JSON.stringify({title:data.title,flow:data.flow.name,notes},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='suiza-review-notes.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||e.metaKey||e.ctrlKey||e.altKey)return;const link=links.find(l=>l.trigger==='Key'&&isActive(l.source)&&l.key.toLowerCase()===e.key.toLowerCase());if(link){e.preventDefault();dispatch(link)}else if(e.key==='Escape'&&overlays.length){overlays.pop();render()}});
+window.addEventListener('resize',layout);render();
+</script></body></html>

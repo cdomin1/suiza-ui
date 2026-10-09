@@ -1,0 +1,27 @@
+[package]
+name = "suiza"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.31.1", features = ["persistence"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.15"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "tiff", "webp"] }
+ab_glyph = "0.2.32"
+epaint_default_fonts = "0.31.1"
+fontdb = "0.23"
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
+flo_curves = "0.8.1"
+rustybuzz = "0.20"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = "0.21"
+
+[patch.crates-io]
+egui-winit = { path = "vendor/egui-winit" }
+
+[build-dependencies]
+winresource = "0.1.31"
