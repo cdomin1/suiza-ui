@@ -8,6 +8,7 @@
 # Local working documents and recovery copies are not application source.
 /Atelier.json
 /Atelier2.json
+/Untitled.suiza-ui
 /*-recovery-*.json
 .env
 .env.*

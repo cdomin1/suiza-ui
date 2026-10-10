@@ -2,12 +2,56 @@
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
+mod assets;
+mod document_file;
 mod fonts;
 mod prototype;
+mod sketch_import;
 mod text;
 mod vector;
 
 const ACCENT: Color32 = Color32::from_rgb(96, 83, 255);
+
+// Canvas presets are editable starting dimensions, not platform upload restrictions.
+const CANVAS_PRESETS: [&[(&str, [f32; 2])]; 3] = [
+    &[
+        ("Phone · 390 × 844", [390.0, 844.0]),
+        ("Phone compact · 375 × 812", [375.0, 812.0]),
+        ("Phone large · 430 × 932", [430.0, 932.0]),
+        ("Android · 360 × 800", [360.0, 800.0]),
+        ("Tablet · 834 × 1194", [834.0, 1194.0]),
+        ("Tablet landscape · 1194 × 834", [1194.0, 834.0]),
+        ("Tablet large · 1024 × 1366", [1024.0, 1366.0]),
+    ],
+    &[
+        ("Web HD · 1920 × 1080", [1920.0, 1080.0]),
+        ("Web desktop · 1440 × 900", [1440.0, 900.0]),
+        ("Web laptop · 1366 × 768", [1366.0, 768.0]),
+        ("Web tablet · 768 × 1024", [768.0, 1024.0]),
+        ("Web mobile · 390 × 844", [390.0, 844.0]),
+        ("Presentation · 1280 × 720", [1280.0, 720.0]),
+        ("4K · 3840 × 2160", [3840.0, 2160.0]),
+    ],
+    &[
+        ("Square post · 1080 × 1080", [1080.0, 1080.0]),
+        ("Portrait post · 1080 × 1350", [1080.0, 1350.0]),
+        ("Tall post · 1080 × 1440", [1080.0, 1440.0]),
+        ("Story / Reel · 1080 × 1920", [1080.0, 1920.0]),
+        ("Landscape post · 1200 × 628", [1200.0, 628.0]),
+        ("Pinterest Pin · 1000 × 1500", [1000.0, 1500.0]),
+        ("Video thumbnail · 1280 × 720", [1280.0, 720.0]),
+        ("Square ad · 1440 × 1440", [1440.0, 1440.0]),
+        ("Portrait ad · 1440 × 1800", [1440.0, 1800.0]),
+        ("Display rectangle · 300 × 250", [300.0, 250.0]),
+        ("Large rectangle · 336 × 280", [336.0, 280.0]),
+        ("Leaderboard · 728 × 90", [728.0, 90.0]),
+        ("Large leaderboard · 970 × 90", [970.0, 90.0]),
+        ("Half-page ad · 300 × 600", [300.0, 600.0]),
+        ("Skyscraper · 160 × 600", [160.0, 600.0]),
+        ("Mobile banner · 320 × 50", [320.0, 50.0]),
+        ("Large mobile banner · 320 × 100", [320.0, 100.0]),
+    ],
+];
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 enum Kind {
@@ -242,6 +286,11 @@ impl Document {
         } else {
             serde_json::from_value(value).map_err(|e| e.to_string())?
         };
+        doc.validate()?;
+        Ok(doc)
+    }
+    fn validate(&self) -> Result<(), String> {
+        let doc = self;
         if doc.pages.iter().flat_map(|p| &p.artboards).any(|b| {
             let f = &b.frame;
             ![f.x, f.y, f.width, f.height, f.radius]
@@ -326,7 +375,7 @@ impl Document {
         {
             return Err("Invalid layer geometry".into());
         }
-        Ok(doc)
+        Ok(())
     }
 }
 impl Default for Document {
@@ -663,6 +712,8 @@ struct Studio {
     redo: Vec<Document>,
     drag_origin: Option<Layer>,
     resize_corner: Option<usize>,
+    marquee_start: Option<Pos2>,
+    marquee_base: Vec<usize>,
     pan: Vec2,
     grid: bool,
     snap: bool,
@@ -676,6 +727,7 @@ struct Studio {
     welcome: bool,
     recent: Vec<std::path::PathBuf>,
     welcome_search: String,
+    assets_ui: assets::AssetsUi,
     swatches: Vec<[u8; 3]>,
     #[cfg(target_os = "macos")]
     native_menu: Option<NativeMenu>,
@@ -714,6 +766,8 @@ impl Default for Studio {
             redo: vec![],
             drag_origin: None,
             resize_corner: None,
+            marquee_start: None,
+            marquee_base: vec![],
             pan: Vec2::ZERO,
             grid: false,
             snap: true,
@@ -727,6 +781,7 @@ impl Default for Studio {
             welcome: false,
             recent: vec![],
             welcome_search: String::new(),
+            assets_ui: Default::default(),
             swatches: vec![
                 [96, 83, 255],
                 [118, 202, 151],
@@ -787,6 +842,8 @@ impl Studio {
         self.path_node = None;
         self.drag_origin = None;
         self.group_drag.clear();
+        self.marquee_start = None;
+        self.marquee_base.clear();
     }
     fn open_in_tab(&mut self, doc: Document, path: Option<std::path::PathBuf>) {
         self.ensure_tabs();
@@ -1111,6 +1168,9 @@ impl Studio {
         let mut custom = ctx
             .data(|d| d.get_temp::<[f32; 2]>(egui::Id::new("welcome_size")))
             .unwrap_or([600.0, 500.0]);
+        let mut preset_choices = ctx
+            .data(|d| d.get_temp::<[usize; 3]>(egui::Id::new("welcome_presets")))
+            .unwrap_or([0; 3]);
         let mut chosen = None;
         let mut new_size = None;
         let mut template = false;
@@ -1161,20 +1221,31 @@ impl Studio {
                                 egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(8).inner_margin(12).show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.x = 8.0;
                                     ui.horizontal_top(|ui| {
-                                        for (i, (label, size)) in [("Phone", [390.0, 844.0]), ("Tablet", [834.0, 1194.0]), ("Web", [1920.0, 1080.0]), ("Custom size", custom)].into_iter().enumerate() {
-                                            ui.allocate_ui(Vec2::new(card_width - 6.0, 140.0), |ui| {
+                                        for (i, (label, size)) in [("Devices", CANVAS_PRESETS[0][preset_choices[0]].1), ("Web", CANVAS_PRESETS[1][preset_choices[1]].1), ("Social & ads", CANVAS_PRESETS[2][preset_choices[2]].1), ("Custom size", custom)].into_iter().enumerate() {
+                                            ui.allocate_ui(Vec2::new(card_width, 140.0), |ui| {
                                                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                                    let (rect, response) = ui.allocate_exact_size(Vec2::new(card_width - 6.0, 65.0), Sense::click());
-                                                    let icon_size = match i { 0 => Vec2::new(23.0, 43.0), 1 => Vec2::new(33.0, 43.0), _ => Vec2::new(48.0, 32.0) };
+                                                    let (rect, response) = ui.allocate_exact_size(Vec2::new(card_width, 65.0), Sense::click());
+                                                    let scale = (48.0 / size[0]).min(43.0 / size[1]);
+                                                    let icon_size = Vec2::new(size[0] * scale, size[1] * scale);
                                                     ui.painter().rect_stroke(Rect::from_center_size(rect.center(), icon_size), 3.0, Stroke::new(1.2_f32, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
-                                                    if response.clicked() { new_size = Some(size); }
-                                                    if ui.add(egui::Button::new(egui::RichText::new(label).strong()).frame(false)).clicked() { new_size = Some(size); }
+                                                    if response.on_hover_text("Create a document at this size").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() { new_size = Some(size); }
+                                                    if i < 3 {
+                                                        egui::ComboBox::from_id_salt(("canvas_preset", i))
+                                                            .width(card_width - 8.0)
+                                                            .selected_text(label)
+                                                            .show_ui(ui, |ui| {
+                                                                for (index, (name, _)) in CANVAS_PRESETS[i].iter().enumerate() {
+                                                                    ui.selectable_value(&mut preset_choices[i], index, *name);
+                                                                }
+                                                            });
+                                                        if ui.add(egui::Button::new(CANVAS_PRESETS[i][preset_choices[i]].0.split(" · ").next().unwrap_or(label)).frame(false)).on_hover_text("Create a document at this size").clicked() { new_size = Some(CANVAS_PRESETS[i][preset_choices[i]].1); }
+                                                    } else if ui.add(egui::Button::new(egui::RichText::new(label).strong()).frame(false)).clicked() { new_size = Some(size); }
                                                     if i == 3 {
                                                         ui.horizontal(|ui| {
                                                             ui.add_sized([card_width / 2.0 - 10.0, 24.0], egui::DragValue::new(&mut custom[0]).range(1.0..=4000.0).prefix("W "));
                                                             ui.add_sized([card_width / 2.0 - 10.0, 24.0], egui::DragValue::new(&mut custom[1]).range(1.0..=4000.0).prefix("H "));
                                                         });
-                                                    } else { ui.label(egui::RichText::new(format!("{} × {} px", size[0], size[1])).size(10.0).color(ui.visuals().weak_text_color())); }
+                                                    } else { ui.label(egui::RichText::new(format!("{} × {} px", CANVAS_PRESETS[i][preset_choices[i]].1[0], CANVAS_PRESETS[i][preset_choices[i]].1[1])).size(10.0).color(ui.visuals().weak_text_color())); }
                                                 });
                                             });
                                         }
@@ -1189,7 +1260,7 @@ impl Studio {
                                 ui.horizontal(|ui| {
                                     section_heading(ui, "Recent");
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.add(egui::TextEdit::singleline(&mut self.welcome_search).hint_text("Search recent files").desired_width(180.0));
+                                        search_field(ui, "recent_search", &mut self.welcome_search, "Search recent files", 220.0);
                                     });
                                 });
                                 let files: Vec<_> = self.recent.iter().filter(|p| p.to_string_lossy().to_lowercase().contains(&self.welcome_search.to_lowercase())).cloned().collect();
@@ -1202,7 +1273,7 @@ impl Studio {
                                             let modified = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
                                             let id = egui::Id::new(("recent_preview", path, modified));
                                             let doc = ctx.data(|d| d.get_temp::<Option<std::sync::Arc<Document>>>(id)).unwrap_or_else(|| {
-                                                let doc = std::fs::read_to_string(path).ok().and_then(|s| Document::from_json(&s).ok()).map(std::sync::Arc::new);
+                                                let doc = document_file::load(path).ok().map(std::sync::Arc::new);
                                                 ctx.data_mut(|d| d.insert_temp(id, doc.clone()));
                                                 doc
                                             });
@@ -1227,6 +1298,7 @@ impl Studio {
         ctx.data_mut(|d| {
             d.insert_temp(egui::Id::new("welcome_section"), section);
             d.insert_temp(egui::Id::new("welcome_size"), custom);
+            d.insert_temp(egui::Id::new("welcome_presets"), preset_choices);
         });
         if open_file {
             self.open();
@@ -1467,6 +1539,8 @@ impl Studio {
         self.editing_path = None;
     }
     fn reset_selection(&mut self) {
+        self.marquee_start = None;
+        self.marquee_base.clear();
         self.page = self.page.min(self.doc.pages.len() - 1);
         self.artboard = self
             .artboard
@@ -1532,7 +1606,7 @@ impl Studio {
         Ok(())
     }
     fn save_to_path(&mut self, path: std::path::PathBuf) -> Result<(), String> {
-        let bytes = serde_json::to_vec_pretty(&self.doc).map_err(|e| e.to_string())?;
+        let bytes = document_file::encode(&self.doc, &path)?;
         // A failed write must not truncate an existing document or mark it saved.
         write_document_atomic(&path, &bytes)?;
         self.document_path = Some(path.clone());
@@ -1546,8 +1620,9 @@ impl Studio {
     fn save(&mut self) {
         if let Some(path) = self.document_path.clone().or_else(|| {
             rfd::FileDialog::new()
-                .add_filter("Suiza-UI document", &["json"])
-                .set_file_name(format!("{}.json", self.doc.name))
+                .add_filter("Suiza-UI document", &["suiza-ui"])
+                .add_filter("Legacy JSON document", &["json"])
+                .set_file_name(format!("{}.suiza-ui", self.doc.name))
                 .save_file()
         }) {
             if let Err(e) = self.save_to_path(path) {
@@ -1556,22 +1631,28 @@ impl Studio {
         }
     }
     fn open_path(&mut self, path: std::path::PathBuf) {
-        match std::fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|s| Document::from_json(&s))
-        {
+        match document_file::load(&path) {
             Ok(doc) => {
                 self.open_in_tab(doc, Some(path.clone()));
                 self.remember_document(path);
                 self.welcome = false;
-                self.status = "Document opened".into();
+                let missing = fonts::missing_families(&self.doc);
+                self.status = if missing.is_empty() {
+                    "Document opened".into()
+                } else {
+                    format!(
+                        "Document opened · Missing fonts: {} (using fallback)",
+                        missing.join(", ")
+                    )
+                };
             }
             Err(e) => self.status = format!("Open failed: {e}"),
         }
     }
     fn open(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Suiza-UI document", &["json"])
+            .add_filter("Suiza-UI document", &["suiza-ui"])
+            .add_filter("Legacy JSON document", &["json"])
             .pick_file()
         {
             self.open_path(path);
@@ -1655,6 +1736,35 @@ impl Studio {
             )
             .show(ctx, |ui| {
                 let pane_width = ui.available_width();
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.assets_ui.active, false, "Layers");
+                    ui.selectable_value(&mut self.assets_ui.active, true, "Assets");
+                });
+                if self.assets_ui.active {
+                    match self.assets_ui.show(ui, &self.doc) {
+                        Ok(Some(component)) => {
+                            self.checkpoint();
+                            let board = &mut self.doc.pages[self.page].artboards[self.artboard];
+                            let position = Vec2::new(
+                                (board.frame.width - component.frame.width) / 2.0,
+                                (board.frame.height - component.frame.height) / 2.0,
+                            );
+                            let (group, indices) =
+                                assets::insert_layers(&component, board, position);
+                            self.selected = indices.first().copied();
+                            self.selection = indices;
+                            self.selected_group = Some(group);
+                            self.editing_text = None;
+                            self.editing_path = None;
+                            self.tool = None;
+                            self.pen = false;
+                            self.status = format!("Inserted {}", component.name);
+                        }
+                        Err(e) => self.status = format!("Library import failed: {e}"),
+                        _ => {}
+                    }
+                    return;
+                }
                 ui.spacing_mut().item_spacing.y = 3.0;
                 let search_height = 32.0;
                 let tree_height = (ui.available_height() - search_height).max(80.0);
@@ -1893,13 +2003,36 @@ impl Studio {
                     },
                 );
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.search)
-                            .hint_text("Search Layers…")
-                            .desired_width(pane_width),
+                    search_field(
+                        ui,
+                        "layer_search",
+                        &mut self.search,
+                        "Search layers…",
+                        pane_width,
                     );
                 });
             });
+        // Frame headers accept drops even when their layer list is empty or collapsed.
+        if ctx.input(|i| i.pointer.any_released()) {
+            if let Some(source) =
+                ctx.data(|d| d.get_temp::<(usize, usize)>(egui::Id::new("layer_reorder_source")))
+            {
+                for ai in 0..self.doc.pages[self.page].artboards.len() {
+                    let row = ctx.data(|d| {
+                        d.get_temp::<Rect>(egui::Id::new(("board", self.page, ai)).with("row_rect"))
+                    });
+                    if row.is_some_and(|r| ctx.pointer_hover_pos().is_some_and(|p| r.contains(p))) {
+                        ctx.data_mut(|d| {
+                            d.insert_temp(
+                                egui::Id::new("layer_reorder_request"),
+                                (source, (ai, usize::MAX)),
+                            )
+                        });
+                        break;
+                    }
+                }
+            }
+        }
         if let Some(((source_board, source_layer), (target_board, target_layer))) =
             ctx.data_mut(|d| {
                 d.remove_temp::<((usize, usize), (usize, usize))>(egui::Id::new(
@@ -1907,22 +2040,27 @@ impl Studio {
                 ))
             })
         {
-            if (source_board, source_layer) != (target_board, target_layer) {
-                let boards = &mut self.doc.pages[self.page].artboards;
-                let target_group = boards[target_board].layers[target_layer].group.clone();
-                let mut layer = boards[source_board].layers.remove(source_layer);
-                layer.group = target_group;
-                let target = if source_board == target_board && source_layer < target_layer {
-                    target_layer - 1
-                } else {
-                    target_layer
-                };
-                boards[target_board].layers.insert(target, layer);
+            if let Some(target) = reorder_layer(
+                &mut self.doc.pages[self.page].artboards,
+                (source_board, source_layer),
+                (target_board, target_layer),
+            ) {
+                let old = &self.doc.pages[self.page].artboards[self.artboard].frame;
+                let new = &self.doc.pages[self.page].artboards[target_board].frame;
+                self.pan += Vec2::new(
+                    (target_board as f32 - self.artboard as f32) * 720.0
+                        + (new.width - old.width) / 2.0,
+                    (new.height - old.height) / 2.0,
+                ) * self.zoom;
                 self.artboard = target_board;
                 self.selected = Some(target);
                 self.selection.clear();
+                self.selected_group = None;
+                self.editing_text = None;
+                self.editing_path = None;
             }
         }
+
         if ctx.input(|i| i.pointer.any_released()) {
             ctx.data_mut(|d| {
                 d.remove_temp::<(usize, usize)>(egui::Id::new("layer_reorder_source"))
@@ -2033,6 +2171,7 @@ impl Studio {
             )
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    let field_width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
                     if let Some(group) = self.selected_group.clone() {
                         let before = self.doc.clone();
                         section_heading(ui, "Group");
@@ -2055,13 +2194,13 @@ impl Studio {
                             let mut h = bounds.height();
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
-                                property(ui, "X", &mut x, false);
-                                property(ui, "Y", &mut y, false);
+                                property(ui, "X", &mut x, false, field_width);
+                                property(ui, "Y", &mut y, false, field_width);
                             });
                             section_heading(ui, "Layout");
                             ui.horizontal(|ui| {
-                                property(ui, "W", &mut w, true);
-                                property(ui, "H", &mut h, true);
+                                property(ui, "W", &mut w, true, field_width);
+                                property(ui, "H", &mut h, true, field_width);
                             });
                             for i in indices {
                                 let l = &mut layers[i];
@@ -2084,7 +2223,8 @@ impl Studio {
                             if ui
                                 .add_enabled(
                                     self.action_enabled(action, ctx),
-                                    egui::Button::new(label).min_size(Vec2::new(216.0, 28.0)),
+                                    egui::Button::new(label)
+                                        .min_size(Vec2::new(ui.available_width(), 28.0)),
                                 )
                                 .clicked()
                             {
@@ -2132,15 +2272,15 @@ impl Studio {
                         });
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            property(ui, "X", &mut layer.x, false);
-                            property(ui, "Y", &mut layer.y, false);
+                            property(ui, "X", &mut layer.x, false, field_width);
+                            property(ui, "Y", &mut layer.y, false, field_width);
                         });
                         ui.add_space(10.0);
                         section_heading(ui, "Layout");
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            property(ui, "W", &mut layer.width, true);
-                            property(ui, "H", &mut layer.height, true);
+                            property(ui, "W", &mut layer.width, true, field_width);
+                            property(ui, "H", &mut layer.height, true, field_width);
                         });
                         ui.add_space(8.0);
                         ui.label(
@@ -2162,22 +2302,15 @@ impl Studio {
                             .collect();
                         egui::ComboBox::from_id_salt("group_membership")
                             .selected_text(layer.group.as_deref().unwrap_or("No group"))
-                            .width(210.0)
+                            .width(ui.available_width())
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(&mut layer.group, None, "No group");
                                 for name in group_names {
                                     ui.selectable_value(&mut layer.group, Some(name.clone()), name);
                                 }
                                 if ui.button("New group").clicked() {
-                                    layer.group = Some(format!(
-                                        "Group {}",
-                                        before.pages[self.page].artboards[self.artboard]
-                                            .layers
-                                            .iter()
-                                            .filter_map(|l| l.group.as_ref())
-                                            .collect::<std::collections::BTreeSet<_>>()
-                                            .len()
-                                            + 1
+                                    layer.group = Some(next_group_name(
+                                        &before.pages[self.page].artboards[self.artboard].layers,
                                     ));
                                     ui.close_menu();
                                 }
@@ -2188,7 +2321,7 @@ impl Studio {
                         if layer.kind == Kind::Text {
                             ui.add(
                                 egui::TextEdit::multiline(&mut layer.name)
-                                    .desired_width(210.0)
+                                    .desired_width(ui.available_width())
                                     .desired_rows(2),
                             );
                             ui.add_space(8.0);
@@ -2197,7 +2330,8 @@ impl Studio {
                             ui.scope(|ui| type_controls(ui, layer));
                         } else {
                             ui.add(
-                                egui::TextEdit::singleline(&mut layer.name).desired_width(210.0),
+                                egui::TextEdit::singleline(&mut layer.name)
+                                    .desired_width(ui.available_width()),
                             );
                         }
                         ui.add_space(10.0);
@@ -2371,7 +2505,8 @@ impl Studio {
                             if ui
                                 .add_enabled(
                                     self.action_enabled(action, ctx),
-                                    egui::Button::new(label).min_size(Vec2::new(216.0, 28.0)),
+                                    egui::Button::new(label)
+                                        .min_size(Vec2::new(ui.available_width(), 28.0)),
                                 )
                                 .clicked()
                             {
@@ -2420,7 +2555,10 @@ impl Studio {
                             });
                             ui.checkbox(&mut self.export_trim, "Trim transparent pixels");
                             if ui
-                                .add_sized([216.0, 28.0], egui::Button::new("Export selected…"))
+                                .add_sized(
+                                    [ui.available_width(), 28.0],
+                                    egui::Button::new("Export selected…"),
+                                )
                                 .clicked()
                             {
                                 let ext = self.export_format.to_lowercase();
@@ -2460,17 +2598,20 @@ impl Studio {
                         section_heading(ui, "Frame");
                         ui.add_space(8.0);
                         let board = &mut self.doc.pages[self.page].artboards[self.artboard];
-                        ui.add(egui::TextEdit::singleline(&mut board.name).desired_width(216.0));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut board.name)
+                                .desired_width(ui.available_width()),
+                        );
                         ui.add_space(12.0);
                         ui.horizontal(|ui| {
                             ui.add_sized(
-                                [104.0, 26.0],
+                                [field_width, 26.0],
                                 egui::DragValue::new(&mut board.frame.x)
                                     .prefix("X ")
                                     .speed(1.0),
                             );
                             ui.add_sized(
-                                [104.0, 26.0],
+                                [field_width, 26.0],
                                 egui::DragValue::new(&mut board.frame.y)
                                     .prefix("Y ")
                                     .speed(1.0),
@@ -2481,14 +2622,14 @@ impl Studio {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             ui.add_sized(
-                                [104.0, 26.0],
+                                [field_width, 26.0],
                                 egui::DragValue::new(&mut board.frame.width)
                                     .prefix("W ")
                                     .range(1.0..=8192.0)
                                     .speed(1.0),
                             );
                             ui.add_sized(
-                                [104.0, 26.0],
+                                [field_width, 26.0],
                                 egui::DragValue::new(&mut board.frame.height)
                                     .prefix("H ")
                                     .range(1.0..=8192.0)
@@ -2500,7 +2641,7 @@ impl Studio {
                         section_heading(ui, "Corners");
                         ui.add_space(8.0);
                         ui.add_sized(
-                            [216.0, 26.0],
+                            [ui.available_width(), 26.0],
                             egui::DragValue::new(&mut board.frame.radius)
                                 .prefix("Rounded  ")
                                 .range(0.0..=200.0),
@@ -2516,7 +2657,10 @@ impl Studio {
                         section_heading(ui, "Export");
                         ui.add_space(8.0);
                         if ui
-                            .add_sized([216.0, 28.0], egui::Button::new("Export frame…"))
+                            .add_sized(
+                                [ui.available_width(), 28.0],
+                                egui::Button::new("Export frame…"),
+                            )
                             .clicked()
                         {
                             self.apply_action(Action::BoardExport, ctx);
@@ -2531,10 +2675,26 @@ impl Studio {
                 Color32::from_rgb(239, 239, 239)
             }))
             .show(ctx, |ui| {
+                self.canvas_bounds = ui.available_rect_before_wrap();
+                let header_height = canvas_header_height(self.canvas_bounds.width());
+                let header = Rect::from_min_size(
+                    self.canvas_bounds.min,
+                    Vec2::new(self.canvas_bounds.width(), header_height),
+                );
+                ui.painter()
+                    .rect_filled(header, 0.0, ctx.style().visuals.panel_fill);
+                ui.painter().line_segment(
+                    [header.left_bottom(), header.right_bottom()],
+                    Stroke::new(
+                        1.0_f32,
+                        ctx.style().visuals.widgets.noninteractive.bg_stroke.color,
+                    ),
+                );
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.allocate_space(Vec2::new(self.canvas_bounds.width(), header_height));
                 let (response, painter) =
                     ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
                 let area = response.rect;
-                self.canvas_bounds = area;
                 let space = ctx.input(|i| i.key_down(egui::Key::Space));
                 if response.hovered() {
                     let scroll = ctx.input(|i| i.smooth_scroll_delta);
@@ -2545,8 +2705,10 @@ impl Studio {
                     if zoom_delta != 1.0 {
                         let old = self.zoom;
                         self.zoom = (old * zoom_delta).clamp(0.25, 2.0);
-                        let anchor =
-                            ctx.pointer_hover_pos().unwrap_or(area.center()) - area.center();
+                        let anchor = ctx
+                            .pointer_hover_pos()
+                            .unwrap_or(self.canvas_bounds.center())
+                            - self.canvas_bounds.center();
                         self.pan = anchor - (anchor - self.pan) * (self.zoom / old);
                     }
                     if !ctx.input(|i| i.modifiers.command || i.modifiers.ctrl) {
@@ -2562,7 +2724,9 @@ impl Studio {
                 let frame = self.doc.pages[self.page].artboards[self.artboard]
                     .frame
                     .clone();
-                let origin = area.center() + self.pan + Vec2::new(frame.x, frame.y) * self.zoom
+                let origin = self.canvas_bounds.center()
+                    + self.pan
+                    + Vec2::new(frame.x, frame.y) * self.zoom
                     - Vec2::new(frame.width, frame.height) * self.zoom / 2.0;
                 let mut picked_board = None;
                 for (ai, board_data) in self.doc.pages[self.page].artboards.iter().enumerate() {
@@ -2622,10 +2786,15 @@ impl Studio {
                     egui::FontId::proportional(12.0),
                     Color32::GRAY,
                 );
-                let clipped = painter.with_clip_rect(if frame.clip {
-                    board.intersect(area)
+                let content_area = if self.rulers {
+                    Rect::from_min_max(area.min + Vec2::splat(20.0), area.max)
                 } else {
                     area
+                };
+                let clipped = painter.with_clip_rect(if frame.clip {
+                    board.intersect(content_area)
+                } else {
+                    content_area
                 });
                 if self.rulers {
                     paint_rulers(&painter, area, origin, self.zoom);
@@ -2923,7 +3092,14 @@ impl Studio {
                                 self.selection.clear();
                             }
                             if response.drag_started() {
-                                self.checkpoint();
+                                if self.selected.is_none() {
+                                    self.marquee_start = Some(pos);
+                                    self.marquee_base = self.selection.clone();
+                                    self.drag_origin = None;
+                                    self.group_drag.clear();
+                                } else {
+                                    self.checkpoint();
+                                }
                                 self.group_drag = self
                                     .affected_layers()
                                     .into_iter()
@@ -2982,6 +3158,39 @@ impl Studio {
                             }
                         }
                         self.status = "Editing · hold Alt for precise movement".into();
+                    }
+                }
+                if let Some(start) = self.marquee_start {
+                    if let Some(end) = ctx.pointer_hover_pos() {
+                        let bounds = Rect::from_two_pos(start, end);
+                        painter.rect_filled(bounds, 0.0, ACCENT.gamma_multiply(0.12));
+                        painter.rect_stroke(
+                            bounds,
+                            0.0,
+                            Stroke::new(1.0_f32, ACCENT),
+                            egui::StrokeKind::Inside,
+                        );
+                        self.selection = self.marquee_base.clone();
+                        for (i, layer) in self.doc.pages[self.page].artboards[self.artboard]
+                            .layers
+                            .iter()
+                            .enumerate()
+                        {
+                            if layer.visible
+                                && !layer.locked
+                                && bounds.intersects(rect_for(layer))
+                                && !self.selection.contains(&i)
+                            {
+                                self.selection.push(i);
+                            }
+                        }
+                        self.selected = self.selection.last().copied();
+                        self.selected_group = None;
+                        self.status = format!("{} layers selected", self.selection.len());
+                    }
+                    if response.drag_stopped() || !ctx.input(|i| i.pointer.primary_down()) {
+                        self.marquee_start = None;
+                        self.marquee_base.clear();
                     }
                 }
                 // Text layers remain movable objects until editing is entered.
@@ -3192,6 +3401,22 @@ impl eframe::App for Studio {
                 }
             }
         }
+        for path in ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect::<Vec<_>>()
+        }) {
+            if path
+                .extension()
+                .is_some_and(|e| e == "suiza-ui" || e == "json")
+            {
+                self.open_path(path);
+            } else {
+                self.status = "Drop a .suiza-ui or JSON document to open it".into();
+            }
+        }
         self.apply_theme(ctx);
         self.show(ctx);
         if let Some(palette) =
@@ -3232,6 +3457,9 @@ impl eframe::App for Studio {
         }
         if let Ok(json) = serde_json::to_string(&self.theme) {
             storage.set_string("suiza_theme", json);
+        }
+        if let Ok(json) = serde_json::to_string(&self.assets_ui.libraries) {
+            storage.set_string("suiza_libraries_v1", json);
         }
         if let Ok(json) = serde_json::to_string(&self.recent) {
             storage.set_string("suiza_recent", json);
@@ -4366,13 +4594,7 @@ impl Studio {
                     Action::Lock => layers[index].locked = !layers[index].locked,
                     Action::Visible => layers[index].visible = !layers[index].visible,
                     Action::Group => {
-                        let n = layers
-                            .iter()
-                            .filter_map(|l| l.group.as_ref())
-                            .collect::<std::collections::BTreeSet<_>>()
-                            .len()
-                            + 1;
-                        let group = format!("Group {n}");
+                        let group = next_group_name(layers);
                         for i in self.selection.iter().copied().chain(std::iter::once(index)) {
                             if let Some(layer) = layers.get_mut(i).filter(|l| !l.locked) {
                                 layer.group = Some(group.clone());
@@ -4715,18 +4937,6 @@ fn tree_section(
     let response =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, open)
             .show_header(ui, |ui| {
-                let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-                paint_icon(
-                    ui.painter(),
-                    rect.center(),
-                    icon,
-                    if selected {
-                        ACCENT
-                    } else {
-                        ui.visuals().text_color()
-                    },
-                    0.6,
-                );
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(ui.available_width(), 23.0), Sense::click());
                 if selected || response.hovered() {
@@ -4740,6 +4950,21 @@ fn tree_section(
                         },
                     );
                 }
+                paint_icon(
+                    ui.painter(),
+                    rect.left_center() + Vec2::new(16.0, 0.0),
+                    icon,
+                    if selected {
+                        Color32::WHITE
+                    } else {
+                        ui.visuals().text_color()
+                    },
+                    0.65,
+                );
+                let text_rect = Rect::from_min_max(
+                    rect.min + Vec2::new(30.0, 0.0),
+                    rect.max - Vec2::new(8.0, 0.0),
+                );
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(id.with("row_rect"), rect));
                 response.widget_info(|| {
@@ -4759,7 +4984,7 @@ fn tree_section(
                     ui.ctx()
                         .data_mut(|d| d.insert_temp(id.with("rename"), title.to_owned()));
                 }
-                if let Some(name) = inline_name_editor(ui, rect, id.with("rename")) {
+                if let Some(name) = inline_name_editor(ui, text_rect, id.with("rename")) {
                     ui.ctx()
                         .data_mut(|d| d.insert_temp(id.with("renamed"), name));
                 }
@@ -4767,16 +4992,16 @@ fn tree_section(
                     title.to_owned(),
                     egui::FontId::new(11.0, egui::FontFamily::Name("UI Bold".into())),
                     color,
-                    rect.width(),
+                    text_rect.width(),
                 );
-                job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width());
+                job.wrap = egui::text::TextWrapping::truncate_at_width(text_rect.width());
                 let galley = ui.painter().layout_job(job);
                 if !ui
                     .ctx()
                     .data(|d| d.get_temp::<String>(id.with("rename")).is_some())
                 {
                     ui.painter().galley(
-                        rect.left_center() - Vec2::new(0.0, galley.size().y / 2.0),
+                        text_rect.left_center() - Vec2::new(0.0, galley.size().y / 2.0),
                         galley,
                         color,
                     );
@@ -4827,6 +5052,55 @@ fn small_icon(ui: &mut egui::Ui, icon: usize, tip: &str) -> egui::Response {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
     response.on_hover_text(tip)
 }
+fn next_group_name(layers: &[Layer]) -> String {
+    let mut n = 1;
+    while layers
+        .iter()
+        .any(|l| l.group.as_deref() == Some(format!("Group {n}").as_str()))
+    {
+        n += 1;
+    }
+    format!("Group {n}")
+}
+
+/// Reparent without changing the object's position on the pasteboard.
+fn reorder_layer(
+    boards: &mut [Artboard],
+    source: (usize, usize),
+    target: (usize, usize),
+) -> Option<usize> {
+    let (from, index) = source;
+    let (to, destination) = target;
+    if from >= boards.len()
+        || to >= boards.len()
+        || index >= boards[from].layers.len()
+        || boards[from].layers[index].locked
+        || source == target
+    {
+        return None;
+    }
+    let group = boards[to]
+        .layers
+        .get(destination)
+        .and_then(|l| l.group.clone());
+    let offset = Vec2::new(
+        (from as f32 - to as f32) * 720.0 + boards[from].frame.x - boards[to].frame.x,
+        boards[from].frame.y - boards[to].frame.y,
+    );
+    let mut layer = boards[from].layers.remove(index);
+    layer.x += offset.x;
+    layer.y += offset.y;
+    layer.group = group;
+    let destination = if from == to && index < destination {
+        destination.saturating_sub(1)
+    } else {
+        destination
+    };
+    let destination = destination.min(boards[to].layers.len());
+    boards[to].layers.insert(destination, layer);
+    Some(destination)
+}
+
 fn tree_row(
     ui: &mut egui::Ui,
     layer: &mut Layer,
@@ -4880,7 +5154,7 @@ fn tree_row(
     }
     paint_icon(
         ui.painter(),
-        Pos2::new(row.left() + 10.0, row.center().y),
+        Pos2::new(row.left() + 16.0, row.center().y),
         match layer.kind {
             Kind::Rectangle => 1,
             Kind::Ellipse => 2,
@@ -4902,7 +5176,7 @@ fn tree_row(
     if let Some(name) = inline_name_editor(
         ui,
         Rect::from_min_max(
-            row.left_top() + Vec2::new(22.0, 0.0),
+            row.left_top() + Vec2::new(30.0, 0.0),
             row.right_bottom() - Vec2::new(40.0, 0.0),
         ),
         rename_id,
@@ -4915,10 +5189,10 @@ fn tree_row(
             egui::FontId::proportional(11.0),
             color,
         );
-        job.wrap = egui::text::TextWrapping::truncate_at_width(width - 56.0);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(width - 66.0);
         let galley = ui.painter().layout_job(job);
         ui.painter()
-            .galley(Pos2::new(row.left() + 22.0, row.top() + 5.0), galley, color);
+            .galley(Pos2::new(row.left() + 30.0, row.top() + 5.0), galley, color);
     }
     let lock_rect = Rect::from_center_size(
         Pos2::new(row.right() - 10.0, row.center().y),
@@ -4962,11 +5236,29 @@ fn tree_row(
     });
     (response.clicked() || response.secondary_clicked()) && !lock.clicked() && !eye.clicked()
 }
+fn canvas_header_height(width: f32) -> f32 {
+    if width < 820.0 {
+        94.0
+    } else {
+        52.0
+    }
+}
 fn island(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::new()
-        .fill(ctx.style().visuals.panel_fill)
+        .fill(if ctx.style().visuals.dark_mode {
+            Color32::from_rgb(48, 50, 57)
+        } else {
+            ctx.style().visuals.panel_fill
+        })
         .corner_radius(18)
-        .stroke(Stroke::new(0.5_f32, Color32::from_black_alpha(10)))
+        .stroke(Stroke::new(
+            1.0_f32,
+            if ctx.style().visuals.dark_mode {
+                Color32::from_rgb(86, 89, 99)
+            } else {
+                Color32::from_black_alpha(10)
+            },
+        ))
         .shadow(egui::epaint::Shadow {
             offset: [0, 3],
             blur: 12,
@@ -5202,6 +5494,69 @@ fn paint_artboard(p: &egui::Painter, origin: Pos2, zoom: f32, board: &Artboard) 
     }
 }
 
+/// Shared search surface with visible boundaries and a drawn magnifier.
+fn search_field(
+    ui: &mut egui::Ui,
+    salt: &str,
+    value: &mut String,
+    hint: &str,
+    width: f32,
+) -> egui::Response {
+    let width = width.min(ui.available_width()).max(80.0);
+    let id = ui.make_persistent_id(salt);
+    let dark = ui.visuals().dark_mode;
+    let focused = ui.memory(|m| m.has_focus(id));
+    let border = if focused {
+        ACCENT
+    } else if dark {
+        Color32::from_rgb(112, 117, 133)
+    } else {
+        Color32::from_rgb(174, 179, 195)
+    };
+    let foreground = if dark {
+        Color32::from_gray(210)
+    } else {
+        Color32::from_gray(90)
+    };
+    egui::Frame::new()
+        .fill(if dark {
+            Color32::from_rgb(43, 46, 54)
+        } else {
+            Color32::WHITE
+        })
+        .stroke(Stroke::new(1.0_f32, border))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width((width - 22.0).max(58.0));
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let (rect, icon) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::click());
+                let center = rect.center() - Vec2::splat(1.5);
+                ui.painter()
+                    .circle_stroke(center, 4.5, Stroke::new(1.4_f32, foreground));
+                ui.painter().line_segment(
+                    [center + Vec2::splat(3.2), center + Vec2::splat(7.0)],
+                    Stroke::new(1.4_f32, foreground),
+                );
+                let response = ui.add(
+                    egui::TextEdit::singleline(value)
+                        .id(id)
+                        .frame(false)
+                        .margin(0)
+                        .hint_text(egui::RichText::new(hint).color(foreground))
+                        .desired_width(ui.available_width()),
+                );
+                if icon.clicked() {
+                    response.request_focus();
+                }
+                response
+            })
+            .inner
+        })
+        .inner
+}
+
 fn welcome_document_card(
     ui: &mut egui::Ui,
     doc: &Document,
@@ -5223,7 +5578,11 @@ fn welcome_document_card(
                 let origin =
                     rect.center() - Vec2::new(board.frame.width, board.frame.height) * scale / 2.0;
                 paint_artboard(
-                    &ui.painter().with_clip_rect(rect.shrink(8.0)),
+                    &ui.painter()
+                        .with_clip_rect(rect.shrink(8.0).intersect(Rect::from_min_size(
+                            origin,
+                            Vec2::new(board.frame.width, board.frame.height) * scale,
+                        ))),
                     origin,
                     scale,
                     board,
@@ -5274,6 +5633,7 @@ fn close_icon_button(ui: &mut egui::Ui, size: f32) -> egui::Response {
         ],
         stroke,
     );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -5677,11 +6037,11 @@ fn paint_rendered_layer(
 }
 
 fn export_preview(ui: &mut egui::Ui, layer: &Layer, backdrop: &[Layer]) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(216.0, 100.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 100.0), Sense::hover());
     let painter = ui.painter().with_clip_rect(rect);
     let p = &painter;
     for y in 0..10 {
-        for x in 0..22 {
+        for x in 0..(rect.width() / 10.0).ceil() as usize {
             p.rect_filled(
                 Rect::from_min_size(
                     rect.min + Vec2::new(x as f32 * 10.0, y as f32 * 10.0),
@@ -5696,7 +6056,9 @@ fn export_preview(ui: &mut egui::Ui, layer: &Layer, backdrop: &[Layer]) {
     if !layer.visible {
         return;
     }
-    let scale = (196.0 / layer.width).min(80.0 / layer.height).min(1.0);
+    let scale = ((rect.width() - 20.0) / layer.width)
+        .min(80.0 / layer.height)
+        .min(1.0);
     let bounds =
         Rect::from_center_size(rect.center(), Vec2::new(layer.width, layer.height) * scale);
     if layer.kind == Kind::Text
@@ -6569,22 +6931,20 @@ fn section_heading(ui: &mut egui::Ui, text: &str) {
             .color(ui.visuals().text_color()),
     );
 }
-fn property(ui: &mut egui::Ui, label: &str, value: &mut f32, positive: bool) {
+fn property(ui: &mut egui::Ui, label: &str, value: &mut f32, positive: bool, width: f32) {
     egui::Frame::new()
         .fill(ui.visuals().widgets.inactive.bg_fill)
         .corner_radius(7)
         .inner_margin(egui::Margin::symmetric(8, 4))
         .show(ui, |ui| {
-            ui.set_width(87.0);
+            ui.set_width((width - 16.0).max(60.0));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.add_sized(
                     [12.0, 20.0],
-                    egui::Label::new(
-                        egui::RichText::new(label)
-                            .size(10.0)
-                            .color(Color32::from_gray(145)),
-                    ),
+                    egui::Label::new(egui::RichText::new(label).size(10.0).color(
+                        Color32::from_gray(if ui.visuals().dark_mode { 190 } else { 100 }),
+                    )),
                 );
                 let mut drag = egui::DragValue::new(value).speed(1.0);
                 if positive {
@@ -6598,7 +6958,7 @@ fn property(ui: &mut egui::Ui, label: &str, value: &mut f32, positive: bool) {
                 ui.visuals_mut().widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.active.bg_fill = Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.active.weak_bg_fill = Color32::TRANSPARENT;
-                ui.add_sized([68.0, 20.0], drag);
+                ui.add_sized([(width - 36.0).max(40.0), 20.0], drag);
             });
         });
 }
@@ -6708,7 +7068,7 @@ fn tool_button(ui: &mut egui::Ui, active: bool, icon: usize, tip: &str) -> egui:
 }
 fn paint_rulers(painter: &egui::Painter, area: Rect, origin: Pos2, zoom: f32) {
     let fill = if painter.ctx().style().visuals.dark_mode {
-        Color32::from_rgb(41, 42, 48)
+        Color32::from_rgb(32, 34, 39)
     } else {
         Color32::from_rgb(244, 244, 247)
     };
@@ -6739,7 +7099,11 @@ fn paint_rulers(painter: &egui::Painter, area: Rect, origin: Pos2, zoom: f32) {
                 egui::Align2::LEFT_CENTER,
                 value.to_string(),
                 egui::FontId::proportional(9.0),
-                Color32::GRAY,
+                Color32::from_gray(if painter.ctx().style().visuals.dark_mode {
+                    205
+                } else {
+                    100
+                }),
             );
         }
         let y = origin.y + value as f32 * zoom;
@@ -6756,7 +7120,11 @@ fn paint_rulers(painter: &egui::Painter, area: Rect, origin: Pos2, zoom: f32) {
                 egui::Align2::LEFT_CENTER,
                 value.to_string(),
                 egui::FontId::proportional(8.0),
-                Color32::GRAY,
+                Color32::from_gray(if painter.ctx().style().visuals.dark_mode {
+                    205
+                } else {
+                    100
+                }),
             );
         }
     }
@@ -7160,6 +7528,18 @@ fn main() -> eframe::Result {
                 if let Some(json) = storage.get_string("suiza_theme") {
                     studio.theme = serde_json::from_str(&json).unwrap_or_default();
                 }
+                if let Some(json) = storage.get_string("suiza_libraries_v1") {
+                    if let Ok(libraries) = serde_json::from_str::<Vec<assets::Library>>(&json) {
+                        studio.assets_ui.libraries = libraries
+                            .into_iter()
+                            .filter(|l| {
+                                serde_json::to_string(&l.document)
+                                    .ok()
+                                    .is_some_and(|s| Document::from_json(&s).is_ok())
+                            })
+                            .collect();
+                    }
+                }
                 if let Some(json) = storage.get_string("suiza_recent") {
                     studio.recent = serde_json::from_str(&json).unwrap_or_default();
                 }
@@ -7169,6 +7549,14 @@ fn main() -> eframe::Result {
                     }
                 }
                 studio.welcome = true;
+            }
+            for path in std::env::args_os().skip(1).map(std::path::PathBuf::from) {
+                if path
+                    .extension()
+                    .is_some_and(|e| e == "suiza-ui" || e == "json")
+                {
+                    studio.open_path(path);
+                }
             }
             cc.egui_ctx.data_mut(|d| {
                 d.insert_temp(egui::Id::new("suiza_swatches"), studio.swatches.clone())
@@ -7185,6 +7573,31 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_document_save_close_reopen_and_failed_open_preserve_work() {
+        let path =
+            std::env::temp_dir().join(format!("suiza-native-save-{}.suiza-ui", std::process::id()));
+        let mut app = Studio::default();
+        app.doc.pages[0].artboards[0].name = "Saved native frame".into();
+        app.doc.pages[0].artboards[0].layers[1].label = Some("Saved native label".into());
+        let expected = app.doc.clone();
+        app.save_to_path(path.clone()).unwrap();
+        assert!(app.saved_document == expected);
+        app.close_tab(app.active_tab);
+        app.open_path(path.clone());
+        assert!(app.doc == expected);
+        assert_eq!(app.document_path.as_ref(), Some(&path));
+        assert_eq!(app.recent.first(), Some(&path));
+        let old_path = app.document_path.clone();
+        let damaged = path.with_extension("broken.suiza-ui");
+        std::fs::write(&damaged, b"PKbroken").unwrap();
+        app.open_path(damaged.clone());
+        assert!(app.doc == expected);
+        assert_eq!(app.document_path, old_path);
+        assert!(app.status.starts_with("Open failed:"));
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(damaged).unwrap();
+    }
     #[test]
     fn save_command_reopens_exact_edits_and_failed_save_stays_dirty() {
         let ctx = egui::Context::default();
@@ -7994,6 +8407,101 @@ mod regression_tests {
         frame(&mut app, vec![button(end + Vec2::new(20.0, 30.0), false)]);
         assert_eq!(app.doc.pages[0].artboards[0].layers[0].x, 310.0);
         assert_eq!(app.doc.pages[0].artboards[0].layers[1].x, 430.0);
+        app.select_group(0, group);
+        frame(&mut app, vec![]);
+        let press = origin + Vec2::new(530.0, 310.0) * app.zoom;
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(press), button(press, true)],
+        );
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(press + Vec2::new(20.0, 20.0))],
+        );
+        let end = press + Vec2::new(220.0, 90.0) * app.zoom;
+        frame(&mut app, vec![egui::Event::PointerMoved(end)]);
+        frame(&mut app, vec![button(end, false)]);
+        let layers = &app.doc.pages[0].artboards[0].layers;
+        assert_eq!(layers[0].width, 200.0);
+        assert_eq!(layers[1].width, 200.0);
+        assert_eq!(layers[0].height, 120.0);
+        assert_eq!(layers[1].x, 550.0);
+        app.undo();
+        assert_eq!(app.doc.pages[0].artboards[0].layers[1].width, 100.0);
+    }
+    #[test]
+    fn marquee_selects_visible_unlocked_objects_without_editing_document() {
+        let ctx = egui::Context::default();
+        configure_fonts(&ctx);
+        let mut app = Studio::default();
+        app.snap = false;
+        app.reset_selection();
+        app.doc.pages[0].artboards[0].layers = [150.0, 270.0, 350.0, 240.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| {
+                let mut layer = Layer::new(Kind::Rectangle, x, 180.0);
+                layer.width = 100.0;
+                layer.height = 60.0;
+                layer.locked = i == 2;
+                layer.visible = i != 3;
+                layer
+            })
+            .collect();
+        let original = app.doc.clone();
+        let mut time = 0.0;
+        let mut frame = |app: &mut Studio, events| {
+            time += 0.016;
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1320.0, 860.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| app.show(ctx),
+            );
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: Default::default(),
+        };
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        let origin = app.canvas_bounds.center() + app.pan - Vec2::new(320.0, 220.0) * app.zoom;
+        let start = origin + Vec2::new(140.0, 170.0) * app.zoom;
+        let end = origin + Vec2::new(390.0, 260.0) * app.zoom;
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+        );
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(start + Vec2::new(20.0, 20.0))],
+        );
+        frame(&mut app, vec![egui::Event::PointerMoved(end)]);
+        frame(&mut app, vec![button(end, false)]);
+        assert_eq!(app.selection, vec![0, 1]);
+        assert!(app.doc == original);
+        assert!(app.history.is_empty());
+    }
+    #[test]
+    fn reparenting_to_empty_frames_preserves_world_position_and_locks() {
+        let mut doc = Document::default();
+        let boards = &mut doc.pages[0].artboards;
+        boards[1].layers.clear();
+        boards[0].frame.x = 20.0;
+        boards[1].frame.x = 80.0;
+        let original = boards[0].layers[0].clone();
+        let index = reorder_layer(boards, (0, 0), (1, usize::MAX)).unwrap();
+        assert_eq!(index, 0);
+        assert_eq!(boards[1].layers[0].x + 720.0 + 80.0, original.x + 20.0);
+        assert!(boards[1].layers[0].group.is_none());
+        boards[1].layers[0].locked = true;
+        assert!(reorder_layer(boards, (1, 0), (0, 0)).is_none());
+        assert!(Document::from_json(&serde_json::to_string(&doc).unwrap()).is_ok());
     }
     #[test]
     fn frame_geometry_persists_and_controls_export_dimensions() {

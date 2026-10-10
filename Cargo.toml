@@ -16,6 +16,7 @@ fontdb = "0.23"
 tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 flo_curves = "0.8.1"
 rustybuzz = "0.20"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = "0.21"

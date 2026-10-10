@@ -9,6 +9,8 @@ fn database() -> &'static fontdb::Database {
     static DB: OnceLock<fontdb::Database> = OnceLock::new();
     DB.get_or_init(|| {
         let mut db = fontdb::Database::new();
+        db.load_font_data(include_bytes!("../assets/fonts/Inter-Regular.ttf").to_vec());
+        db.load_font_data(include_bytes!("../assets/fonts/Inter-Bold.ttf").to_vec());
         db.load_system_fonts();
         db
     })
@@ -54,6 +56,22 @@ fn installed(family: &str, bold: bool, italic: bool) -> Option<LoadedFont> {
             })?
         })
         .clone()
+}
+pub(super) fn missing_families(doc: &super::Document) -> Vec<String> {
+    doc.pages
+        .iter()
+        .flat_map(|p| &p.artboards)
+        .flat_map(|b| &b.layers)
+        .filter_map(|l| {
+            l.typography
+                .family
+                .as_deref()
+                .filter(|name| installed(name, l.typography.bold, l.typography.italic).is_none())
+        })
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 pub(super) fn render_font(style: &TypeStyle) -> ab_glyph::FontArc {
     if let Some(font) = style
@@ -281,10 +299,7 @@ pub(super) fn font_browser(
         .ctx()
         .data(|d| d.get_temp::<String>(id.with("search")))
         .unwrap_or_default();
-    let input = ui.add_sized(
-        [280.0, 28.0],
-        egui::TextEdit::singleline(&mut search).hint_text("Search fonts"),
-    );
+    let input = crate::search_field(ui, "font_search", &mut search, "Search fonts…", 280.0);
     if ui
         .ctx()
         .data_mut(|d| d.remove_temp::<bool>(egui::Id::new("focus_font_search")))
@@ -462,4 +477,14 @@ pub(super) fn shaping_data(style: &TypeStyle) -> (Arc<Vec<u8>>, u32, bool) {
         epaint_default_fonts::UBUNTU_LIGHT
     };
     (Arc::new(bytes.to_vec()), 0, style.italic)
+}
+
+/// Resolve Sketch font descriptors without replacing unavailable source names.
+pub(super) fn family_from_postscript(name: &str) -> String {
+    database()
+        .faces()
+        .find(|f| f.post_script_name == name)
+        .and_then(|f| f.families.first())
+        .map(|f| f.0.clone())
+        .unwrap_or_else(|| name.to_owned())
 }

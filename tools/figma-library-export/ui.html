@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{font:14px Inter,system-ui,sans-serif;margin:24px;color:#292b34}h2{font-size:18px}p{line-height:1.5;color:#666}button{border:0;border-radius:8px;background:#6053ff;color:white;padding:12px 18px;cursor:pointer}button:disabled{opacity:.5}#notes{max-height:90px;overflow:auto;font-size:12px}
+</style></head><body><h2>Export to Suiza-UI</h2><p>Export selected components, or all components on this page. The source stays unchanged. Export only assets you have permission to use.</p><button id="export">Export library</button><p id="status"></p><div id="notes"></div><script>
+const button=document.getElementById('export'),status=document.getElementById('status');
+button.onclick=()=>{button.disabled=true;status.textContent='Preparing local export…';parent.postMessage({pluginMessage:{type:'export'}},'*');};
+onmessage=event=>{const m=event.data.pluginMessage;if(!m)return;button.disabled=false;if(m.type==='error'){status.textContent=m.message;return;}if(m.type==='ready'){const data=JSON.stringify(m.data),url=URL.createObjectURL(new Blob([data],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='suiza-library.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='Import the downloaded JSON in Suiza-UI → Assets.';document.getElementById('notes').textContent=m.data.warnings.join('\n');}};
+</script></body></html>

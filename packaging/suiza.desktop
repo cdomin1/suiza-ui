@@ -6,4 +6,4 @@ Exec=suiza %f
 Icon=suiza
 Terminal=false
 Categories=Graphics;VectorGraphics;
-MimeType=application/json;
+MimeType=application/x-suiza-ui;
