@@ -20,5 +20,5 @@ EOF
 output="dist/SUIZA-Canvas-${version}-macOS-${arch}.dmg"
 hdiutil create -volname "SUIZA Canvas $version" -srcfolder "$stage" -format UDZO -ov "$output"
 hdiutil verify "$output"
-shasum -a 256 "$output" > "$output.sha256"
+(cd dist && shasum -a 256 "$(basename "$output")") > "$output.sha256"
 printf 'Created %s\n' "$output"
