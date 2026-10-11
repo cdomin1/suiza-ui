@@ -314,7 +314,9 @@ pub(super) fn font_browser(
         .data(|d| d.get_temp::<Vec<String>>(egui::Id::new("document_fonts")))
         .unwrap_or_default();
     let Some(names) = names else {
-        ui.weak("Loading installed fonts…");
+        ui.label(
+            egui::RichText::new("Loading installed fonts…").color(crate::secondary_text_color(ui)),
+        );
         return false;
     };
     let query = search.to_lowercase();
@@ -407,7 +409,7 @@ pub(super) fn font_browser(
             }
         });
     if names.is_empty() {
-        ui.weak("No matching fonts");
+        ui.label(egui::RichText::new("No matching fonts").color(crate::secondary_text_color(ui)));
     }
     chosen
 }

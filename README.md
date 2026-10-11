@@ -1,6 +1,6 @@
-# Suiza-UI
+# SUIZA Canvas
 
-Suiza-UI is the interface design app in the Suiza family of creative apps.
+SUIZA Canvas is the interface design app in the Suiza family of creative apps.
 
 A local Rust desktop design editor inspired by Sketch's compact inspector and Figma's document tabs. The app uses egui/eframe and saves editable documents as JSON.
 
@@ -12,7 +12,7 @@ cargo test --locked
 cargo fmt --check
 ```
 
-On macOS, `scripts/bundle-macos.sh debug` or `scripts/bundle-macos.sh release` builds `dist/Suiza-UI.app`. The bundle uses the white knife icon on #EB5E34. Icon assets are maintained in `assets/`; regenerate platform sizes with `python3 scripts/generate-icons.py` (requires Pillow).
+On macOS, `scripts/bundle-macos.sh debug` or `scripts/bundle-macos.sh release` builds `dist/SUIZA Canvas.app`. The bundle uses the supplied blue-violet SUIZA Canvas icon. Icon assets are maintained in `assets/`; regenerate platform sizes with `python3 scripts/generate-icons.py` (requires Pillow).
 
 ## Current functionality
 
@@ -46,4 +46,6 @@ This repository captures work in progress, not a completed release. See [the req
 
 ## License
 
-Suiza-UI application code is available under [MIT](LICENSE). Third-party fonts and vendored dependencies retain their own licenses; see `assets/fonts/` and `vendor/`.
+SUIZA Canvas application code is available under [MIT](LICENSE). Third-party fonts and vendored dependencies retain their own licenses; see `assets/fonts/` and `vendor/`.
+
+Creative workflows are available in the [Creative Workbench](docs/CREATIVE_WORKBENCH.md). Third-party extensions can use the initial [plugin command API](docs/PLUGINS.md), with a working manifest in `examples/plugins`.

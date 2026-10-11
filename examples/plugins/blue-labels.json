@@ -1,0 +1,14 @@
+{
+  "api_version": 1,
+  "id": "org.suiza.examples.blue-labels",
+  "name": "Blue labels",
+  "author": "SUIZA contributors",
+  "permissions": ["selection.write"],
+  "commands": [{
+    "name": "Apply blue and prefix names",
+    "operations": [
+      {"type": "fill", "color": [45, 113, 225]},
+      {"type": "rename", "prefix": "Blue · ", "suffix": ""}
+    ]
+  }]
+}

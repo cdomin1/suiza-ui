@@ -323,6 +323,14 @@ impl PrototypeUi {
             .show(ctx, |ui| {
                 crate::island(ctx).show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(!self.editing && !self.sharing, "Design")
+                            .clicked()
+                        {
+                            self.editing = false;
+                            self.prototype_menu = false;
+                            self.sharing = false;
+                        }
                         let prototype_button = ui
                             .selectable_label(self.editing, "Prototype")
                             .on_hover_text("Connect screens and define interactions");
@@ -573,7 +581,7 @@ impl PrototypeUi {
                     ui.label(
                         egui::RichText::new("Select a layer or frame to edit its interactions.")
                             .small()
-                            .weak(),
+                            .color(crate::secondary_text_color(ui)),
                     );
                     preview |= ui.button("▶ Preview flow").clicked();
                 });
@@ -605,7 +613,7 @@ impl PrototypeUi {
                         ui.checkbox(&mut self.settings.specs, "Design specifications");
                     }
                     ui.label("Export a standalone HTML file. All screens and interactions are included; no internet connection is required.");
-                    if self.settings.comments { ui.label(egui::RichText::new("Review notes stay in the viewer’s browser and can be downloaded. They are not synced between people.").small().weak()); }
+                    if self.settings.comments { ui.label(egui::RichText::new("Review notes stay in the viewer’s browser and can be downloaded. They are not synced between people.").small().color(crate::secondary_text_color(ui))); }
                     export = ui.button("Export interactive HTML…").clicked();
                     preview |= ui.button("Preview in browser").clicked();
                 });

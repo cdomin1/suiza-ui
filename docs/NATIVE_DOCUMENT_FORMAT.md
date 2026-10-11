@@ -1,4 +1,4 @@
-# Native Suiza-UI documents
+# Native SUIZA Canvas documents
 
 New documents save as `.suiza-ui`. File > Open and Open Recent read these files directly; users do not need to unzip them. Existing JSON files remain readable and continue saving as JSON. Save As can create a native copy. Documents can also be dropped onto the editor or supplied as a command-line filename.
 

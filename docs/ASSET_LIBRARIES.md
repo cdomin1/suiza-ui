@@ -18,9 +18,9 @@ The Figma bridge preserves simple layers and rasterizes complex appearance; see 
 
 ## Official platform kits
 
-Suiza-UI links to publisher pages instead of bundling or redistributing their assets:
+SUIZA Canvas links to publisher pages instead of bundling or redistributing their assets:
 
 - Apple iOS/iPadOS and macOS: https://developer.apple.com/design/resources/
 - Material 3: https://m3.material.io/get-started
 
-Apple's official Sketch download presents its Design Resources license. Its displayed terms restrict use to Apple-platform UI mockups and prohibit embedding the resources in software and unauthorized redistribution. The agreement was left unaccepted during development. Publisher assets and proprietary fonts are excluded from Suiza-UI's source and distribution; users obtain their own copies under applicable publisher terms. The original Suiza starter assets are not Apple/Google kits.
+Apple's official Sketch download presents its Design Resources license. Its displayed terms restrict use to Apple-platform UI mockups and prohibit embedding the resources in software and unauthorized redistribution. The agreement was left unaccepted during development. Publisher assets and proprietary fonts are excluded from SUIZA Canvas's source and distribution; users obtain their own copies under applicable publisher terms. The original Suiza starter assets are not Apple/Google kits.

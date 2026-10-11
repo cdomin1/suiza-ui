@@ -191,7 +191,7 @@ impl AssetsUi {
         ui.label(
             egui::RichText::new(format!("{} assets", filtered.len()))
                 .small()
-                .color(ui.visuals().weak_text_color()),
+                .color(crate::secondary_text_color(ui)),
         );
         let mut insert = None;
         egui::ScrollArea::vertical()
@@ -203,6 +203,7 @@ impl AssetsUi {
                     let preview = Document {
                         name: component.name.clone(),
                         prototype: Default::default(),
+                        checkpoints: vec![],
                         pages: vec![crate::Page {
                             name: "Assets".into(),
                             artboards: vec![(*component).clone()],
@@ -334,6 +335,7 @@ fn essentials() -> Document {
     Document {
         name: "Suiza essentials".into(),
         prototype: Default::default(),
+        checkpoints: vec![],
         pages: vec![crate::Page {
             name: "Components".into(),
             artboards: boards,
@@ -555,7 +557,7 @@ fn kit_card(ui: &mut egui::Ui, index: usize, title: &str, publisher: &str, url: 
     ui.label(
         egui::RichText::new(publisher)
             .small()
-            .color(ui.visuals().weak_text_color()),
+            .color(crate::secondary_text_color(ui)),
     );
     ui.hyperlink_to("View official kit ↗", url);
 }

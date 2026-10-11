@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod plugins;
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
@@ -9,8 +10,9 @@ mod prototype;
 mod sketch_import;
 mod text;
 mod vector;
+mod workbench;
 
-const ACCENT: Color32 = Color32::from_rgb(96, 83, 255);
+const ACCENT: Color32 = Color32::from_rgb(45, 113, 225);
 
 // Canvas presets are editable starting dimensions, not platform upload restrictions.
 const CANVAS_PRESETS: [&[(&str, [f32; 2])]; 3] = [
@@ -257,6 +259,8 @@ struct Page {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 struct Document {
     #[serde(default)]
+    checkpoints: Vec<workbench::Checkpoint>,
+    #[serde(default)]
     prototype: prototype::Prototype,
     name: String,
     pages: Vec<Page>,
@@ -272,6 +276,7 @@ impl Document {
             let old: Legacy = serde_json::from_value(value).map_err(|e| e.to_string())?;
             Self {
                 prototype: prototype::Prototype::default(),
+                checkpoints: vec![],
                 name: "Imported document".into(),
                 pages: vec![Page {
                     name: "Page 1".into(),
@@ -290,6 +295,7 @@ impl Document {
         Ok(doc)
     }
     fn validate(&self) -> Result<(), String> {
+        workbench::validate_history(&self.checkpoints)?;
         let doc = self;
         if doc.pages.iter().flat_map(|p| &p.artboards).any(|b| {
             let f = &b.frame;
@@ -612,6 +618,7 @@ impl Default for Document {
         alternate[6].name = "slow living.".into();
         Self {
             prototype: prototype::Prototype::default(),
+            checkpoints: vec![],
             name: "Atelier".into(),
             pages: vec![
                 Page {
@@ -648,6 +655,7 @@ impl Default for Document {
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 enum ThemeMode {
     Light,
+    HighContrastLight,
     Dark,
     #[default]
     System,
@@ -690,6 +698,8 @@ struct Studio {
     clipboard_group: Vec<Layer>,
     board_clipboard: Option<Artboard>,
     prototype_ui: prototype::PrototypeUi,
+    workbench_ui: workbench::Workbench,
+    plugins_ui: plugins::Manager,
     font_chooser: bool,
     selection: Vec<usize>,
     group_drag: Vec<(usize, Layer)>,
@@ -744,6 +754,8 @@ impl Default for Studio {
             clipboard_group: vec![],
             board_clipboard: None,
             prototype_ui: prototype::PrototypeUi::default(),
+            workbench_ui: workbench::Workbench::default(),
+            plugins_ui: plugins::Manager::default(),
             font_chooser: false,
             selection: vec![],
             group_drag: vec![],
@@ -892,8 +904,13 @@ impl Studio {
             .show(ctx, |ui| {
                 egui::ScrollArea::horizontal().show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("SUIZA Canvas").strong().color(ACCENT));
+                        ui.separator();
+                        if ui.button("Workbench").clicked() {
+                            self.workbench_ui.open = true;
+                        }
                         if ui
-                            .small_button("Recents")
+                            .small_button("Home")
                             .on_hover_text("Recent documents and templates")
                             .clicked()
                         {
@@ -998,18 +1015,20 @@ impl Studio {
     }
     fn apply_theme(&mut self, ctx: &egui::Context) {
         let dark = match self.theme {
-            ThemeMode::Light => false,
+            ThemeMode::Light | ThemeMode::HighContrastLight => false,
             ThemeMode::Dark => true,
             ThemeMode::System => ctx.system_theme() == Some(egui::Theme::Dark),
         };
         if self.applied_dark == Some(dark) {
             return;
         }
+        let high_contrast = self.theme == ThemeMode::HighContrastLight;
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("high_contrast_ui"), high_contrast));
         let previous_style = (*ctx.style()).clone();
-        ctx.set_theme(if dark {
-            egui::Theme::Dark
-        } else {
-            egui::Theme::Light
+        ctx.set_theme(match self.theme {
+            ThemeMode::System => egui::ThemePreference::System,
+            ThemeMode::Light | ThemeMode::HighContrastLight => egui::ThemePreference::Light,
+            ThemeMode::Dark => egui::ThemePreference::Dark,
         });
         let mut visuals = if dark {
             egui::Visuals::dark()
@@ -1017,7 +1036,7 @@ impl Studio {
             egui::Visuals::light()
         };
         visuals.panel_fill = if dark {
-            Color32::from_rgb(33, 34, 39)
+            Color32::from_rgb(39, 40, 43)
         } else {
             Color32::WHITE
         };
@@ -1027,7 +1046,7 @@ impl Studio {
             Color32::from_rgb(58, 59, 72)
         });
         visuals.widgets.inactive.bg_fill = if dark {
-            Color32::from_rgb(47, 48, 55)
+            Color32::from_rgb(60, 63, 70)
         } else {
             Color32::from_rgb(239, 239, 244)
         };
@@ -1051,18 +1070,49 @@ impl Studio {
         };
         visuals.widgets.hovered.fg_stroke.color = visuals.widgets.inactive.fg_stroke.color;
         visuals.widgets.active.fg_stroke.color = visuals.widgets.inactive.fg_stroke.color;
-        visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(7);
-        visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(7);
-        visuals.widgets.active.corner_radius = egui::CornerRadius::same(7);
-        visuals.widgets.open.corner_radius = egui::CornerRadius::same(7);
-        visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-        visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-        visuals.selection.bg_fill = if dark {
-            Color32::from_rgb(64, 54, 111)
+        visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+        visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
+        visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+        visuals.widgets.open.corner_radius = egui::CornerRadius::same(4);
+        visuals.widgets.inactive.bg_stroke = if dark {
+            Stroke::new(1.0_f32, Color32::from_rgb(135, 141, 153))
         } else {
-            Color32::from_rgb(235, 233, 255)
+            Stroke::new(1.0_f32, Color32::from_rgb(140, 147, 160))
+        };
+        visuals.widgets.hovered.bg_fill = if dark {
+            Color32::from_rgb(75, 80, 90)
+        } else {
+            Color32::from_rgb(226, 233, 243)
+        };
+        visuals.widgets.hovered.weak_bg_fill = visuals.widgets.hovered.bg_fill;
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, ACCENT);
+        visuals.selection.bg_fill = if dark {
+            Color32::from_rgb(35, 64, 104)
+        } else {
+            Color32::from_rgb(222, 236, 255)
         };
         visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
+        if high_contrast {
+            visuals.override_text_color = Some(Color32::BLACK);
+            visuals.panel_fill = Color32::WHITE;
+            visuals.extreme_bg_color = Color32::from_gray(245);
+            visuals.window_fill = Color32::WHITE;
+            visuals.window_stroke = Stroke::new(2.0_f32, Color32::BLACK);
+            for widget in [
+                &mut visuals.widgets.inactive,
+                &mut visuals.widgets.hovered,
+                &mut visuals.widgets.active,
+                &mut visuals.widgets.open,
+                &mut visuals.widgets.noninteractive,
+            ] {
+                widget.fg_stroke = Stroke::new(1.5_f32, Color32::BLACK);
+                widget.bg_stroke = Stroke::new(1.5_f32, Color32::from_gray(65));
+            }
+            visuals.widgets.inactive.bg_fill = Color32::WHITE;
+            visuals.widgets.inactive.weak_bg_fill = Color32::WHITE;
+            visuals.selection.bg_fill = Color32::from_rgb(210, 231, 255);
+            visuals.selection.stroke = Stroke::new(2.0_f32, Color32::from_rgb(0, 70, 160));
+        }
         let mut style = previous_style;
         style.visuals = visuals;
         ctx.set_style(style);
@@ -1073,69 +1123,62 @@ impl Studio {
         self.recent.insert(0, path);
         self.recent.truncate(12);
     }
-    fn show_floating_tools(&mut self, ctx: &egui::Context) {
-        egui::Area::new(egui::Id::new("canvas_tools"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(
-                self.canvas_bounds.left_top()
-                    + Vec2::new(
-                        16.0,
-                        if self.canvas_bounds.width() < 820.0 {
-                            54.0
-                        } else {
-                            12.0
-                        },
-                    ),
+    fn show_tool_rail(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("form_tool_rail")
+            .exact_width(48.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(ctx.style().visuals.extreme_bg_color)
+                    .inner_margin(8),
             )
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    island(ctx).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for (tool, icon, tip) in [
-                                (None, 0, "Select · V"),
-                                (Some(Kind::Rectangle), 1, "Rectangle · R"),
-                                (Some(Kind::Ellipse), 2, "Ellipse · O"),
-                                (Some(Kind::Text), 3, "Text · T"),
-                            ] {
-                                if tool_button(
-                                    ui,
-                                    self.tool == tool && !self.pen && self.editing_path.is_none(),
-                                    icon,
-                                    tip,
-                                )
-                                .clicked()
-                                {
-                                    self.apply_action(Action::Tool(tool), ctx);
-                                }
-                            }
-                            if tool_button(
-                                ui,
-                                self.pen || self.editing_path.is_some(),
-                                14,
-                                "Bézier pen · P",
-                            )
-                            .clicked()
-                            {
-                                self.apply_action(Action::Pen, ctx);
-                            }
-                            ui.separator();
-                            if tool_button(ui, false, 6, &format!("Undo · {} Z", shortcut_name()))
-                                .clicked()
-                            {
-                                self.undo();
-                            }
-                            if tool_button(ui, self.grid, 7, "Toggle grid").clicked() {
-                                self.grid = !self.grid;
-                            }
-                            if tool_button(ui, self.rulers, 8, "Toggle rulers").clicked() {
-                                self.rulers = !self.rulers;
-                            }
-                        });
-                    });
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 12.0);
+                ui.vertical_centered(|ui| {
+                    for (tool, icon, tip) in [
+                        (None, 0, "Select · V"),
+                        (Some(Kind::Rectangle), 1, "Rectangle · R"),
+                        (Some(Kind::Ellipse), 2, "Ellipse · O"),
+                        (Some(Kind::Text), 3, "Text · T"),
+                    ] {
+                        if tool_button(
+                            ui,
+                            self.tool == tool && !self.pen && self.editing_path.is_none(),
+                            icon,
+                            tip,
+                        )
+                        .clicked()
+                        {
+                            self.apply_action(Action::Tool(tool), ctx);
+                        }
+                    }
+                    if tool_button(
+                        ui,
+                        self.pen || self.editing_path.is_some(),
+                        14,
+                        "Bézier pen · P",
+                    )
+                    .clicked()
+                    {
+                        self.apply_action(Action::Pen, ctx);
+                    }
+                    ui.separator();
+                    if tool_button(ui, false, 6, &format!("Undo · {} Z", shortcut_name())).clicked()
+                    {
+                        self.undo();
+                    }
+                    if tool_button(ui, self.grid, 7, "Toggle grid").clicked() {
+                        self.grid = !self.grid;
+                    }
+                    if tool_button(ui, self.rulers, 8, "Toggle rulers").clicked() {
+                        self.rulers = !self.rulers;
+                    }
                 });
             });
+    }
+    fn show_floating_tools(&mut self, ctx: &egui::Context) {
         egui::Area::new(egui::Id::new("canvas_zoom"))
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .pivot(egui::Align2::RIGHT_TOP)
             .fixed_pos(self.canvas_bounds.right_top() + Vec2::new(-16.0, 12.0))
             .show(ctx, |ui| {
@@ -1175,7 +1218,7 @@ impl Studio {
         let mut new_size = None;
         let mut template = false;
         let mut open_file = false;
-        egui::Window::new("Suiza-UI Home")
+        egui::Window::new("SUIZA Canvas Home")
             .title_bar(false).collapsible(false).resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .frame(egui::Frame::window(&ctx.style()).fill(ctx.style().visuals.panel_fill).corner_radius(16).inner_margin(0))
@@ -1184,7 +1227,7 @@ impl Studio {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
                 egui::Frame::new().inner_margin(20).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Suiza-UI").size(20.0).strong());
+                        ui.label(egui::RichText::new("SUIZA Canvas").size(20.0).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if close_icon_button(ui, 28.0).on_hover_text("Return to editor").clicked() { self.welcome = false; }
                         });
@@ -1203,8 +1246,8 @@ impl Studio {
                             if ui.add_sized([130.0, 30.0], egui::Button::new(egui::RichText::new(*label).color(if section == i { Color32::WHITE } else { ui.visuals().text_color() })).fill(if section == i { ACCENT } else { ui.visuals().widgets.inactive.bg_fill }).stroke(Stroke::NONE)).clicked() { section = i; }
                         }
                         ui.add_space(24.0);
-                        ui.label(egui::RichText::new("LOCAL WORKSPACE").size(9.0).color(ui.visuals().weak_text_color()));
-                        ui.label(egui::RichText::new("Your files stay on your device.").size(11.0).color(ui.visuals().weak_text_color()));
+                        ui.label(egui::RichText::new("LOCAL WORKSPACE").size(9.0).color(secondary_text_color(ui)));
+                        ui.label(egui::RichText::new("Your files stay on your device.").size(11.0).color(secondary_text_color(ui)));
                         });
                     });
                     egui::Frame::new().inner_margin(24).show(ui, |ui| {
@@ -1214,7 +1257,7 @@ impl Studio {
                         ui.spacing_mut().item_spacing = Vec2::new(16.0, 16.0);
                         egui::ScrollArea::vertical().max_height(height - 115.0).show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(match section { 1 => "Your files", 2 => "Templates", _ => "Design. Prototype. Share." }).size(18.0).strong());
+                                ui.label(egui::RichText::new(match section { 1 => "Your files", 2 => "Templates", _ => "Give your ideas form." }).size(18.0).strong());
                             });
                             if section == 0 {
                                 let card_width = (content_width - 48.0) / 4.0;
@@ -1227,10 +1270,11 @@ impl Studio {
                                                     let (rect, response) = ui.allocate_exact_size(Vec2::new(card_width, 65.0), Sense::click());
                                                     let scale = (48.0 / size[0]).min(43.0 / size[1]);
                                                     let icon_size = Vec2::new(size[0] * scale, size[1] * scale);
-                                                    ui.painter().rect_stroke(Rect::from_center_size(rect.center(), icon_size), 3.0, Stroke::new(1.2_f32, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
+                                                    ui.painter().rect_stroke(Rect::from_center_size(rect.center(), icon_size), 3.0, Stroke::new(1.2_f32, secondary_text_color(ui)), egui::StrokeKind::Inside);
                                                     if response.on_hover_text("Create a document at this size").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() { new_size = Some(size); }
                                                     if i < 3 {
                                                         egui::ComboBox::from_id_salt(("canvas_preset", i))
+                                                            .wrap_mode(egui::TextWrapMode::Truncate)
                                                             .width(card_width - 8.0)
                                                             .selected_text(label)
                                                             .show_ui(ui, |ui| {
@@ -1245,7 +1289,7 @@ impl Studio {
                                                             ui.add_sized([card_width / 2.0 - 10.0, 24.0], egui::DragValue::new(&mut custom[0]).range(1.0..=4000.0).prefix("W "));
                                                             ui.add_sized([card_width / 2.0 - 10.0, 24.0], egui::DragValue::new(&mut custom[1]).range(1.0..=4000.0).prefix("H "));
                                                         });
-                                                    } else { ui.label(egui::RichText::new(format!("{} × {} px", CANVAS_PRESETS[i][preset_choices[i]].1[0], CANVAS_PRESETS[i][preset_choices[i]].1[1])).size(10.0).color(ui.visuals().weak_text_color())); }
+                                                    } else { ui.label(egui::RichText::new(format!("{} × {} px", CANVAS_PRESETS[i][preset_choices[i]].1[0], CANVAS_PRESETS[i][preset_choices[i]].1[1])).size(10.0).color(secondary_text_color(ui))); }
                                                 });
                                             });
                                         }
@@ -1264,7 +1308,7 @@ impl Studio {
                                     });
                                 });
                                 let files: Vec<_> = self.recent.iter().filter(|p| p.to_string_lossy().to_lowercase().contains(&self.welcome_search.to_lowercase())).cloned().collect();
-                                if files.is_empty() { ui.label(egui::RichText::new("Opened and saved documents will appear here.").color(ui.visuals().weak_text_color())); }
+                                if files.is_empty() { ui.label(egui::RichText::new("Opened and saved documents will appear here.").color(secondary_text_color(ui))); }
                                 let columns = ((content_width + 16.0) / 160.0).floor().max(1.0) as usize;
                                 let card_width = (content_width - (columns - 1) as f32 * 16.0) / columns as f32;
                                 for row in files.chunks(columns) {
@@ -1316,6 +1360,75 @@ impl Studio {
             self.doc.pages[0].artboards[0].frame.height = size[1];
             self.saved_document = self.doc.clone();
             self.welcome = false;
+        }
+    }
+    fn apply_workbench(&mut self, command: workbench::Command) {
+        let before = self.doc.clone();
+        let result = match command {
+            workbench::Command::Insert(mut boards) => {
+                let mut x = self.doc.pages[self.page]
+                    .artboards
+                    .iter()
+                    .map(|b| b.frame.x + b.frame.width)
+                    .fold(0.0_f32, f32::max)
+                    + 80.0;
+                for board in &mut boards {
+                    board.frame.x = x;
+                    board.frame.y = 0.0;
+                    x += board.frame.width + 80.0;
+                }
+                self.doc.pages[self.page].artboards.extend(boards);
+                self.artboard = self.doc.pages[self.page].artboards.len() - 1;
+                self.selected = None;
+                self.selection.clear();
+                self.selected_group = None;
+                self.editing_text = None;
+                self.editing_path = None;
+                self.pen = false;
+                self.path_node = None;
+                let frame = &self.doc.pages[self.page].artboards[self.artboard].frame;
+                self.zoom = (self.canvas_bounds.width() / (frame.width + 100.0))
+                    .min(self.canvas_bounds.height() / (frame.height + 100.0))
+                    .clamp(0.1, 1.0);
+                self.pan = -Vec2::new(frame.x, frame.y) * self.zoom;
+                Ok("Generated frames added. Save to keep them.".to_string())
+            }
+            workbench::Command::Select(finding) => {
+                if finding.page < self.doc.pages.len()
+                    && finding.board < self.doc.pages[finding.page].artboards.len()
+                {
+                    self.page = finding.page;
+                    self.artboard = finding.board;
+                    self.selected = finding.layer;
+                    self.selection = finding.layer.into_iter().collect();
+                    self.selected_group = None;
+                    let frame = &self.doc.pages[self.page].artboards[self.artboard].frame;
+                    self.pan = -Vec2::new(frame.x, frame.y) * self.zoom;
+                }
+                Ok(finding.message)
+            }
+            workbench::Command::SavePoint(name) => workbench::checkpoint(&mut self.doc, &name)
+                .map(|_| "Checkpoint created. Save to persist it.".to_string()),
+            workbench::Command::Restore(index) => workbench::restore(&self.doc, index).map(|doc| {
+                self.doc = doc;
+                self.page = 0;
+                self.artboard = 0;
+                self.selected = None;
+                self.selection.clear();
+                self.selected_group = None;
+                self.editing_text = None;
+                self.editing_path = None;
+                "Checkpoint restored; Undo returns to your previous document.".to_string()
+            }),
+            workbench::Command::Deliver(path, notes) => {
+                workbench::delivery(&self.doc, &path, &notes)
+                    .map(|_| format!("Delivery package exported to {}", path.display()))
+            }
+        };
+        self.status = result.unwrap_or_else(|e| format!("Workbench: {e}"));
+        if self.doc != before {
+            self.workbench_ui.clear_history_selection();
+            self.record_change(before);
         }
     }
     fn record_change(&mut self, before: Document) {
@@ -1620,7 +1733,7 @@ impl Studio {
     fn save(&mut self) {
         if let Some(path) = self.document_path.clone().or_else(|| {
             rfd::FileDialog::new()
-                .add_filter("Suiza-UI document", &["suiza-ui"])
+                .add_filter("SUIZA Canvas document", &["suiza-ui"])
                 .add_filter("Legacy JSON document", &["json"])
                 .set_file_name(format!("{}.suiza-ui", self.doc.name))
                 .save_file()
@@ -1651,7 +1764,7 @@ impl Studio {
     }
     fn open(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Suiza-UI document", &["suiza-ui"])
+            .add_filter("SUIZA Canvas document", &["suiza-ui"])
             .add_filter("Legacy JSON document", &["json"])
             .pick_file()
         {
@@ -1700,13 +1813,13 @@ impl Studio {
                     ui.label(
                         egui::RichText::new(&self.status)
                             .size(10.0)
-                            .color(ui.visuals().weak_text_color()),
+                            .color(secondary_text_color(ui)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Space to pan · Alt to bypass snapping")
                                 .size(10.0)
-                                .color(ui.visuals().weak_text_color()),
+                                .color(secondary_text_color(ui)),
                         );
                     });
                 });
@@ -1725,6 +1838,7 @@ impl Studio {
         let mut tree_selection = None;
         let mut tree_group_selection = None;
         let tree_before = self.doc.clone();
+        self.show_tool_rail(ctx);
         egui::SidePanel::left("layers")
             .default_width(224.0)
             .width_range(200.0..=440.0)
@@ -1845,7 +1959,7 @@ impl Studio {
                             ui.label(
                                 egui::RichText::new("Layers")
                                     .size(10.0)
-                                    .color(ui.visuals().weak_text_color()),
+                                    .color(secondary_text_color(ui)),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -2286,7 +2400,7 @@ impl Studio {
                         ui.label(
                             egui::RichText::new("Fixed size · Artboard coordinates")
                                 .size(10.0)
-                                .color(ui.visuals().weak_text_color()),
+                                .color(secondary_text_color(ui)),
                         );
                         ui.add_space(10.0);
                         ui.separator();
@@ -2670,7 +2784,7 @@ impl Studio {
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(if ctx.style().visuals.dark_mode {
-                Color32::from_rgb(25, 26, 30)
+                Color32::from_rgb(29, 30, 32)
             } else {
                 Color32::from_rgb(239, 239, 239)
             }))
@@ -3424,22 +3538,54 @@ impl eframe::App for Studio {
         {
             self.swatches = palette;
         }
-        self.show_floating_tools(ctx);
+        if !self.workbench_ui.open && !self.plugins_ui.open && !self.welcome {
+            self.show_floating_tools(ctx);
+        }
         let before = self.doc.clone();
-        if let Some(error) = self.prototype_ui.show(
-            ctx,
-            self.canvas_bounds,
-            &mut self.doc,
-            self.page,
-            self.artboard,
-            self.selected,
-            self.pan,
-            self.zoom,
-        ) {
-            self.status = error;
+        if !self.workbench_ui.open && !self.plugins_ui.open && !self.welcome {
+            if let Some(error) = self.prototype_ui.show(
+                ctx,
+                self.canvas_bounds,
+                &mut self.doc,
+                self.page,
+                self.artboard,
+                self.selected,
+                self.pan,
+                self.zoom,
+            ) {
+                self.status = error;
+            }
         }
         if before != self.doc {
             self.record_change(before);
+        }
+        if let Some(command) = self
+            .workbench_ui
+            .show(ctx, &self.doc, self.page, self.artboard)
+        {
+            self.apply_workbench(command);
+        }
+        if let Some((plugin, command)) = self.plugins_ui.show(ctx) {
+            let mut selection = self.selection.clone();
+            if let Some(index) = self.selected {
+                selection.push(index);
+            }
+            match self.plugins_ui.installed[plugin].run(
+                command,
+                &self.doc,
+                self.page,
+                self.artboard,
+                &selection,
+            ) {
+                Ok(next) => {
+                    if next != self.doc {
+                        let before = std::mem::replace(&mut self.doc, next);
+                        self.record_change(before);
+                    }
+                    self.status = "Plugin completed. Undo is available.".into();
+                }
+                Err(e) => self.status = format!("Plugin: {e}"),
+            }
         }
         if self.welcome {
             self.show_welcome(ctx);
@@ -3449,6 +3595,9 @@ impl eframe::App for Studio {
         std::time::Duration::from_secs(5)
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Ok(json) = serde_json::to_string(&self.plugins_ui.installed) {
+            storage.set_string("suiza_plugins_v1", json);
+        }
         if let Ok(json) = self.session_json() {
             storage.set_string("suiza_session_v1", json);
         }
@@ -3469,6 +3618,8 @@ impl eframe::App for Studio {
 
 #[derive(Clone, Copy)]
 enum Action {
+    Plugins,
+    Workbench,
     Prototype,
     SharePrototype,
     PreviewPrototype,
@@ -4080,6 +4231,8 @@ impl Studio {
                     )
                 });
             }
+            Action::Plugins => self.plugins_ui.open = true,
+            Action::Workbench => self.workbench_ui.open = true,
             Action::Prototype => self.prototype_ui.prototype(),
             Action::SharePrototype => self.prototype_ui.share(),
             Action::PreviewPrototype => self.prototype_ui.preview(),
@@ -4226,7 +4379,11 @@ impl Studio {
                     self.editing_text = Some(i);
                 }
             }
-            Action::Theme(theme) => self.theme = theme,
+            Action::Theme(theme) => {
+                self.theme = theme;
+                self.applied_dark = None;
+                ctx.request_repaint();
+            }
             Action::ToggleGrid => self.grid = !self.grid,
             Action::ToggleRulers => self.rulers = !self.rulers,
             Action::Welcome => self.welcome = true,
@@ -4397,6 +4554,7 @@ impl Studio {
                 self.open_in_tab(
                     Document {
                         prototype: prototype::Prototype::default(),
+                        checkpoints: vec![],
                         name: "Untitled".into(),
                         pages: vec![Page {
                             name: "Page 1".into(),
@@ -5237,10 +5395,10 @@ fn tree_row(
     (response.clicked() || response.secondary_clicked()) && !lock.clicked() && !eye.clicked()
 }
 fn canvas_header_height(width: f32) -> f32 {
-    if width < 820.0 {
-        94.0
+    if width < 400.0 {
+        76.0
     } else {
-        52.0
+        48.0
     }
 }
 fn island(ctx: &egui::Context) -> egui::Frame {
@@ -5250,7 +5408,7 @@ fn island(ctx: &egui::Context) -> egui::Frame {
         } else {
             ctx.style().visuals.panel_fill
         })
-        .corner_radius(18)
+        .corner_radius(4)
         .stroke(Stroke::new(
             1.0_f32,
             if ctx.style().visuals.dark_mode {
@@ -5259,12 +5417,6 @@ fn island(ctx: &egui::Context) -> egui::Frame {
                 Color32::from_black_alpha(10)
             },
         ))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 3],
-            blur: 12,
-            spread: 0,
-            color: Color32::from_black_alpha(16),
-        })
         .inner_margin(egui::Margin::symmetric(5, 2))
 }
 fn paint_icon(p: &egui::Painter, c: Pos2, icon: usize, color: Color32, scale: f32) {
@@ -5513,10 +5665,19 @@ fn search_field(
     } else {
         Color32::from_rgb(174, 179, 195)
     };
+    let high_contrast = ui.ctx().data(|d| {
+        d.get_temp::<bool>(egui::Id::new("high_contrast_ui"))
+            .unwrap_or(false)
+    });
+    let border = if high_contrast && !focused {
+        Color32::BLACK
+    } else {
+        border
+    };
     let foreground = if dark {
         Color32::from_gray(210)
     } else {
-        Color32::from_gray(90)
+        secondary_text_color(ui)
     };
     egui::Frame::new()
         .fill(if dark {
@@ -5598,7 +5759,7 @@ fn welcome_document_card(
                 egui::Label::new(
                     egui::RichText::new(subtitle)
                         .size(10.0)
-                        .color(ui.visuals().weak_text_color()),
+                        .color(secondary_text_color(ui)),
                 )
                 .truncate(),
             );
@@ -6636,6 +6797,25 @@ fn inspector_popover_position(ctx: &egui::Context, width: f32, height: f32, top:
     )
 }
 
+fn secondary_text_color(ui: &egui::Ui) -> Color32 {
+    if ui.ctx().data(|d| {
+        d.get_temp::<bool>(egui::Id::new("high_contrast_ui"))
+            .unwrap_or(false)
+    }) {
+        Color32::from_gray(45)
+    } else if ui.visuals().dark_mode {
+        Color32::from_gray(185)
+    } else {
+        Color32::from_gray(90)
+    }
+}
+fn swatch_outline(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode {
+        Color32::from_gray(215)
+    } else {
+        Color32::from_gray(60)
+    }
+}
 fn fill_control(ui: &mut egui::Ui, color: &mut [u8; 3], opacity: Option<&mut f32>) {
     let id = ui.make_persistent_id("fill_picker");
     let mut open = ui
@@ -6649,7 +6829,7 @@ fn fill_control(ui: &mut egui::Ui, color: &mut [u8; 3], opacity: Option<&mut f32
             ui.painter().circle_stroke(
                 rect.center(),
                 10.0,
-                Stroke::new(1.0_f32, Color32::from_black_alpha(30)),
+                Stroke::new(1.5_f32, swatch_outline(ui)),
             );
             if open {
                 ui.painter()
@@ -6684,7 +6864,7 @@ fn fill_control(ui: &mut egui::Ui, color: &mut [u8; 3], opacity: Option<&mut f32
                 ui.label(
                     egui::RichText::new("100%")
                         .size(11.0)
-                        .color(ui.visuals().weak_text_color()),
+                        .color(secondary_text_color(ui)),
                 );
             }
         })
@@ -6795,8 +6975,7 @@ fn fill_control(ui: &mut egui::Ui, color: &mut [u8; 3], opacity: Option<&mut f32
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(
-                                        egui::RichText::new(label)
-                                            .color(ui.visuals().weak_text_color()),
+                                        egui::RichText::new(label).color(secondary_text_color(ui)),
                                     );
                                     ui.add_sized(
                                         [38.0, 20.0],
@@ -6855,7 +7034,7 @@ fn fill_control(ui: &mut egui::Ui, color: &mut [u8; 3], opacity: Option<&mut f32
                         ui.painter().circle_stroke(
                             rect.center(),
                             10.0,
-                            Stroke::new(1.0_f32, Color32::from_black_alpha(30)),
+                            Stroke::new(1.5_f32, swatch_outline(ui)),
                         );
                         if response.clicked() {
                             *color = *saved;
@@ -7044,9 +7223,9 @@ fn tool_button(ui: &mut egui::Ui, active: bool, icon: usize, tip: &str) -> egui:
     if active || response.hovered() {
         ui.painter().rect_filled(
             rect.shrink(1.0),
-            12.0,
+            4.0,
             if active {
-                Color32::from_rgb(235, 232, 255)
+                Color32::from_rgb(222, 236, 255)
             } else {
                 ui.visuals().widgets.hovered.bg_fill
             },
@@ -7164,6 +7343,8 @@ fn menu_groups() -> Vec<(
         (
             "Edit",
             vec![
+                ("Creative Workbench…", Action::Workbench, None),
+                ("Plugins…", Action::Plugins, None),
                 ("Undo", Action::Undo, Some("Cmd+Z")),
                 ("Redo", Action::Redo, Some("Cmd+Shift+Z")),
                 ("Cut layer", Action::CutLayer, Some("Cmd+X")),
@@ -7293,6 +7474,11 @@ fn menu_groups() -> Vec<(
                 ("Toggle grid", Action::ToggleGrid, None),
                 ("Toggle rulers", Action::ToggleRulers, None),
                 ("Appearance: Light", Action::Theme(ThemeMode::Light), None),
+                (
+                    "Appearance: High Contrast Light",
+                    Action::Theme(ThemeMode::HighContrastLight),
+                    None,
+                ),
                 ("Appearance: Dark", Action::Theme(ThemeMode::Dark), None),
                 ("Appearance: System", Action::Theme(ThemeMode::System), None),
                 (
@@ -7315,7 +7501,7 @@ fn menu_groups() -> Vec<(
             "Help",
             vec![
                 ("Keyboard shortcuts", Action::Help, None),
-                ("Welcome to Suiza-UI", Action::Welcome, None),
+                ("Welcome to SUIZA Canvas", Action::Welcome, None),
             ],
         ),
     ]
@@ -7335,13 +7521,13 @@ impl NativeMenu {
     fn new(ctx: egui::Context) -> Result<Self, muda::Error> {
         use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
         let menu = Menu::new();
-        let app = Submenu::new("Suiza-UI", true);
-        app.append(&PredefinedMenuItem::about(Some("About Suiza-UI"), None))?;
+        let app = Submenu::new("SUIZA Canvas", true);
+        app.append(&PredefinedMenuItem::about(Some("About SUIZA Canvas"), None))?;
         app.append(&PredefinedMenuItem::separator())?;
         app.append(&PredefinedMenuItem::hide(None))?;
         app.append(&PredefinedMenuItem::hide_others(None))?;
         app.append(&PredefinedMenuItem::separator())?;
-        let quit = MenuItem::new("Quit Suiza-UI", true, "Cmd+Q".parse().ok());
+        let quit = MenuItem::new("Quit SUIZA Canvas", true, "Cmd+Q".parse().ok());
         app.append(&quit)?;
         menu.append(&app)?;
         let groups = menu_groups();
@@ -7469,7 +7655,7 @@ fn main() -> eframe::Result {
         "Suiza",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_title("Suiza-UI")
+                .with_title("SUIZA Canvas")
                 .with_icon(
                     eframe::icon_data::from_png_bytes(include_bytes!("../assets/suiza-icon.png"))
                         .expect("valid bundled SUIZA icon"),
@@ -7499,10 +7685,10 @@ fn main() -> eframe::Result {
             style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(239, 239, 244);
             style.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(239, 239, 244);
             style.visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-            style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(7);
-            style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(7);
-            style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(7);
-            style.visuals.widgets.open.corner_radius = egui::CornerRadius::same(7);
+            style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+            style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
+            style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+            style.visuals.widgets.open.corner_radius = egui::CornerRadius::same(4);
             style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(229, 225, 245);
             style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(229, 225, 245);
             style.visuals.widgets.hovered.bg_stroke = Stroke::NONE;
@@ -7512,7 +7698,7 @@ fn main() -> eframe::Result {
             style
                 .text_styles
                 .insert(egui::TextStyle::Button, egui::FontId::proportional(12.0));
-            style.visuals.selection.bg_fill = Color32::from_rgb(235, 233, 255);
+            style.visuals.selection.bg_fill = Color32::from_rgb(222, 236, 255);
             style.visuals.widgets.noninteractive.bg_stroke =
                 Stroke::new(1.0_f32, Color32::from_gray(232));
             style.visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
@@ -7522,6 +7708,21 @@ fn main() -> eframe::Result {
                 ..Studio::default()
             };
             if let Some(storage) = cc.storage {
+                if let Some(json) = storage.get_string("suiza_plugins_v1") {
+                    if json.len() <= 8 * 1024 * 1024 {
+                        if let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(&json) {
+                            studio.plugins_ui.installed = values
+                                .into_iter()
+                                .take(100)
+                                .filter_map(|value| {
+                                    serde_json::to_vec(&value)
+                                        .ok()
+                                        .and_then(|bytes| plugins::Plugin::parse(&bytes).ok())
+                                })
+                                .collect();
+                        }
+                    }
+                }
                 if let Some(json) = storage.get_string("suiza_swatches") {
                     studio.swatches = serde_json::from_str(&json).unwrap_or(studio.swatches);
                 }
@@ -7819,7 +8020,7 @@ mod tests {
                 );
             }
             assert!(
-                (app.canvas_bounds.left() - 224.0).abs() < 2.0,
+                (app.canvas_bounds.left() - 272.0).abs() < 2.0,
                 "sidebar overflow: {:?}",
                 app.canvas_bounds
             );
@@ -8625,7 +8826,7 @@ mod regression_tests {
                 );
             }
             let bounds = ctx
-                .memory(|m| m.area_rect(egui::Id::new("Suiza-UI Home")))
+                .memory(|m| m.area_rect(egui::Id::new("SUIZA Canvas Home")))
                 .unwrap();
             assert!(
                 screen.contains_rect(bounds),
@@ -8661,6 +8862,52 @@ mod regression_tests {
         );
         app.theme = ThemeMode::Light;
         app.apply_theme(&ctx);
+        assert!(!ctx.style().visuals.dark_mode);
+    }
+    #[test]
+    fn high_contrast_appearance_is_persistent_and_keeps_artwork_unchanged() {
+        let ctx = egui::Context::default();
+        let mut app = Studio::default();
+        let before = app.doc.clone();
+        app.apply_action(Action::Theme(ThemeMode::HighContrastLight), &ctx);
+        app.apply_theme(&ctx);
+        let visuals = ctx.style().visuals.clone();
+        assert!(!visuals.dark_mode);
+        assert_eq!(visuals.text_color(), Color32::BLACK);
+        assert_eq!(visuals.panel_fill, Color32::WHITE);
+        assert!(visuals.widgets.inactive.bg_stroke.width >= 1.5);
+        assert!(app.doc == before);
+        let saved = serde_json::to_string(&app.theme).unwrap();
+        assert!(serde_json::from_str::<ThemeMode>(&saved).unwrap() == ThemeMode::HighContrastLight);
+        app.apply_action(Action::Theme(ThemeMode::Light), &ctx);
+        app.apply_theme(&ctx);
+        assert!(!ctx.data(|d| d
+            .get_temp::<bool>(egui::Id::new("high_contrast_ui"))
+            .unwrap()));
+    }
+    #[test]
+    fn system_appearance_tracks_os_and_menu_overrides() {
+        let ctx = egui::Context::default();
+        let mut app = Studio::default();
+        assert!(app.theme == ThemeMode::System);
+        let update = |app: &mut Studio, theme| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    system_theme: Some(theme),
+                    ..Default::default()
+                },
+                |ctx| app.apply_theme(ctx),
+            );
+        };
+        update(&mut app, egui::Theme::Dark);
+        assert!(ctx.style().visuals.dark_mode);
+        update(&mut app, egui::Theme::Light);
+        assert!(!ctx.style().visuals.dark_mode);
+        app.apply_action(Action::Theme(ThemeMode::Dark), &ctx);
+        update(&mut app, egui::Theme::Light);
+        assert!(ctx.style().visuals.dark_mode);
+        app.apply_action(Action::Theme(ThemeMode::System), &ctx);
+        update(&mut app, egui::Theme::Light);
         assert!(!ctx.style().visuals.dark_mode);
     }
     #[test]

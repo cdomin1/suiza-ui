@@ -420,6 +420,7 @@ pub fn decode(bytes: &[u8], title: &str) -> Result<Import, String> {
     let mut result = Document {
         name: title.into(),
         prototype: Default::default(),
+        checkpoints: vec![],
         pages: vec![],
     };
     for page in pages {

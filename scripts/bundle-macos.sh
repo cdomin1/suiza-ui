@@ -7,7 +7,7 @@ case "$profile" in
   debug) cargo build --locked ;;
   *) printf 'Usage: %s [release|debug]\n' "$0" >&2; exit 2 ;;
 esac
-bundle="dist/Suiza-UI.app"
+bundle="dist/SUIZA Canvas.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 # Replace the executable with a new inode: overwriting a previously launched
 # Mach-O can leave macOS with cached code-signing pages from the old build.
@@ -21,8 +21,8 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleName</key><string>Suiza-UI</string>
-<key>CFBundleDisplayName</key><string>Suiza-UI</string>
+<key>CFBundleName</key><string>SUIZA Canvas</string>
+<key>CFBundleDisplayName</key><string>SUIZA Canvas</string>
 <key>CFBundleExecutable</key><string>Suiza</string>
 <key>CFBundleIdentifier</key><string>local.suiza.studio</string>
 <key>CFBundleIconFile</key><string>Suiza.icns</string>
