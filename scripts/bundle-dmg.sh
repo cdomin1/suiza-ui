@@ -3,8 +3,13 @@ set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname -s)" = Darwin ] || { printf 'Build DMGs on macOS.\n' >&2; exit 1; }
 version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
-scripts/bundle-macos.sh release
-arch=$(uname -m)
+target="${1:-}"
+scripts/bundle-macos.sh release "$target"
+case "$target" in
+  x86_64-apple-darwin) arch=x86_64 ;;
+  aarch64-apple-darwin) arch=arm64 ;;
+  *) arch=$(uname -m) ;;
+esac
 stage=$(mktemp -d "${TMPDIR:-/tmp}/suiza-dmg.XXXXXX")
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
 ditto "dist/SUIZA Canvas.app" "$stage/SUIZA Canvas.app"

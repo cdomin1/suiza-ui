@@ -14,7 +14,7 @@ cargo fmt --check
 
 On macOS, `scripts/bundle-macos.sh debug` or `scripts/bundle-macos.sh release` builds `dist/SUIZA Canvas.app`. The bundle uses the supplied blue-violet SUIZA Canvas icon. Icon assets are maintained in `assets/`; regenerate platform sizes with `python3 scripts/generate-icons.py` (requires Pillow).
 
-Run `scripts/bundle-dmg.sh` on macOS to build a compressed installer disk image for the host architecture, with an Applications shortcut and SHA-256 checksum. Alpha DMGs are ad-hoc signed and not Apple notarized. Download published packages from the [Releases page](https://github.com/cdomin1/suiza-ui/releases).
+Run `scripts/bundle-dmg.sh` on macOS to build a compressed installer disk image for the host architecture, with an Applications shortcut and SHA-256 checksum. For Intel Macs, install the Rust `x86_64-apple-darwin` target and run `scripts/bundle-dmg.sh x86_64-apple-darwin`; the output is labeled `macOS-x86_64`. Alpha DMGs are ad-hoc signed and not Apple notarized. Download published packages from the [Releases page](https://github.com/cdomin1/suiza-ui/releases).
 
 ## Current functionality
 

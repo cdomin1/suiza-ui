@@ -2,16 +2,24 @@
 set -eu
 cd "$(dirname "$0")/.."
 profile="${1:-release}"
+target="${2:-}"
+case "$target" in
+  ""|aarch64-apple-darwin|x86_64-apple-darwin) ;;
+  *) printf 'Unsupported macOS target: %s\n' "$target" >&2; exit 2 ;;
+esac
+if [ -n "$target" ]; then set -- --target "$target"; else set --; fi
 case "$profile" in
-  release) cargo build --release --locked ;;
-  debug) cargo build --locked ;;
+  release) cargo build --release --locked "$@" ;;
+  debug) cargo build --locked "$@" ;;
   *) printf 'Usage: %s [release|debug]\n' "$0" >&2; exit 2 ;;
 esac
 bundle="dist/SUIZA Canvas.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 # Replace the executable with a new inode: overwriting a previously launched
 # Mach-O can leave macOS with cached code-signing pages from the old build.
-cp "target/$profile/suiza" "$bundle/Contents/MacOS/Suiza.new"
+binary_dir="target/$profile"
+[ -z "$target" ] || binary_dir="target/$target/$profile"
+cp "$binary_dir/suiza" "$bundle/Contents/MacOS/Suiza.new"
 rm -f "$bundle/Contents/MacOS/Suiza"
 mv -f "$bundle/Contents/MacOS/Suiza.new" "$bundle/Contents/MacOS/Suiza"
 cp assets/suiza.icns "$bundle/Contents/Resources/Suiza.icns"
