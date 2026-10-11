@@ -34,6 +34,8 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>Suiza.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>0.1.0</string>
+<key>CFBundleGetInfoString</key><string>SUIZA Canvas 0.1.0-alpha.1</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST

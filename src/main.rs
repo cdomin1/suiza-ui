@@ -12,6 +12,8 @@ mod text;
 mod vector;
 mod workbench;
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 const ACCENT: Color32 = Color32::from_rgb(45, 113, 225);
 
 // Canvas presets are editable starting dimensions, not platform upload restrictions.
@@ -905,6 +907,7 @@ impl Studio {
                 egui::ScrollArea::horizontal().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("SUIZA Canvas").strong().color(ACCENT));
+                        ui.label(format!("Alpha · {APP_VERSION}"));
                         ui.separator();
                         if ui.button("Workbench").clicked() {
                             self.workbench_ui.open = true;
@@ -7519,7 +7522,15 @@ impl NativeMenu {
         use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
         let menu = Menu::new();
         let app = Submenu::new("SUIZA Canvas", true);
-        app.append(&PredefinedMenuItem::about(Some("About SUIZA Canvas"), None))?;
+        app.append(&PredefinedMenuItem::about(
+            Some("About SUIZA Canvas"),
+            Some(muda::AboutMetadata {
+                name: Some("SUIZA Canvas Alpha".into()),
+                version: Some(APP_VERSION.into()),
+                license: Some("MIT".into()),
+                ..Default::default()
+            }),
+        ))?;
         app.append(&PredefinedMenuItem::separator())?;
         app.append(&PredefinedMenuItem::hide(None))?;
         app.append(&PredefinedMenuItem::hide_others(None))?;
@@ -7652,7 +7663,7 @@ fn main() -> eframe::Result {
         "Suiza",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_title("SUIZA Canvas")
+                .with_title(format!("SUIZA Canvas · {APP_VERSION}"))
                 .with_icon(
                     eframe::icon_data::from_png_bytes(include_bytes!("../assets/suiza-icon.png"))
                         .expect("valid bundled SUIZA icon"),

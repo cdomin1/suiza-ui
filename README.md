@@ -1,8 +1,8 @@
 # SUIZA Canvas
 
-SUIZA Canvas is the interface design app in the Suiza family of creative apps.
+SUIZA Canvas is the interface design app in the Suiza family of creative apps. Current development version: **0.1.0-alpha.1 (Alpha)**.
 
-A local Rust desktop design editor inspired by Sketch's compact inspector and Figma's document tabs. The app uses egui/eframe and saves editable documents as JSON.
+A local Rust desktop design editor inspired by Sketch's compact inspector and Figma's document tabs. The app uses egui/eframe and saves editable documents as native `.sza` packages.
 
 ## Build and run
 

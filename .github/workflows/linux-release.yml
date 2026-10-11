@@ -86,4 +86,4 @@ jobs:
         run: |
           cd dist
           sha256sum *.AppImage *.flatpak > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --title "SUIZA Canvas ${GITHUB_REF_NAME#v} · Linux preview" --notes-file ../packaging/LINUX_RELEASE_NOTES.md *.AppImage *.flatpak SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --title "SUIZA Canvas ${GITHUB_REF_NAME#v} · Alpha Linux" --notes-file ../packaging/LINUX_RELEASE_NOTES.md *.AppImage *.flatpak SHA256SUMS

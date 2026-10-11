@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-version=${1:-0.1.0}
+version=${1:-0.1.0-alpha.1}
 [ "$(uname -s)" = Linux ] || { printf 'Build AppImages on Linux.\n' >&2; exit 1; }
 [ "$(uname -m)" = x86_64 ] || { printf 'This package targets x86_64.\n' >&2; exit 1; }
 scripts/bundle-linux.sh
