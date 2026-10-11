@@ -12,6 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libfuse2 patchelf desktop-file-utils xvfb x11-utils
       - run: cargo test --locked
       - name: Download official packaging tools
@@ -30,6 +31,7 @@ jobs:
           scripts/bundle-appimage.sh "${GITHUB_REF_NAME#v}"
       - name: Check AppImage contents and launch
         run: |
+          smoke=$(realpath scripts/smoke-linux-window.sh)
           image=$(realpath dist/*.AppImage)
           mkdir -p "$RUNNER_TEMP/appimage-check"
           cd "$RUNNER_TEMP/appimage-check"
@@ -37,21 +39,19 @@ jobs:
           test -x squashfs-root/usr/bin/suiza
           file squashfs-root/usr/bin/suiza | tee binary.txt
           grep -q 'ELF 64-bit' binary.txt
-          timeout 20s xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 "$image" --appimage-extract-and-run > launch.log 2>&1 && result=0 || result=$?
-          cat launch.log
-          test "$result" -eq 124
+          xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 "$smoke" "$image" --appimage-extract-and-run
       - uses: actions/upload-artifact@v4
         with:
           name: appimage
           path: dist/*.AppImage
           if-no-files-found: error
   flatpak:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder xvfb x11-utils
       - name: Install Flatpak SDK
         run: |
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
@@ -63,6 +63,7 @@ jobs:
           flatpak install --user -y dist/*.flatpak
           flatpak info --user io.github.cdomin1.SuizaCanvas
           flatpak run --command=sh io.github.cdomin1.SuizaCanvas -c 'test -x /app/bin/suiza && test -f /app/share/applications/io.github.cdomin1.SuizaCanvas.desktop'
+          dbus-run-session -- xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 scripts/smoke-linux-window.sh flatpak run io.github.cdomin1.SuizaCanvas
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak
