@@ -10,6 +10,6 @@
   <url type="homepage">https://github.com/cdomin1/suiza-ui</url>
   <url type="bugtracker">https://github.com/cdomin1/suiza-ui/issues</url>
   <provides><binary>suiza</binary><mediatype>application/x-suiza-ui</mediatype></provides>
-  <releases><release version="0.1.0-alpha.2" date="2026-10-11" type="development"/></releases>
+  <releases><release version="0.1.0-alpha.3" date="2026-10-11" type="development"/></releases>
   <content_rating type="oars-1.1"/>
 </component>

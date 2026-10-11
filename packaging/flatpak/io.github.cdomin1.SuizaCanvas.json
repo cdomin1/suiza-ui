@@ -17,7 +17,7 @@
       "sed -i 's/^Icon=suiza$/Icon=io.github.cdomin1.SuizaCanvas/' /app/share/applications/io.github.cdomin1.SuizaCanvas.desktop",
       "install -Dm644 packaging/suiza-ui.xml /app/share/mime/packages/io.github.cdomin1.SuizaCanvas.xml",
       "install -Dm644 packaging/io.github.cdomin1.SuizaCanvas.metainfo.xml /app/share/metainfo/io.github.cdomin1.SuizaCanvas.metainfo.xml",
-      "for size in 16 24 32 48 64 128 256 512 1024; do install -Dm644 assets/icons/$size/suiza.png /app/share/icons/hicolor/${size}x${size}/apps/io.github.cdomin1.SuizaCanvas.png; done",
+      "for size in 16 24 32 48 64 128 256 512; do install -Dm644 assets/icons/$size/suiza.png /app/share/icons/hicolor/${size}x${size}/apps/io.github.cdomin1.SuizaCanvas.png; done",
       "install -Dm644 LICENSE /app/share/licenses/suiza/LICENSE",
       "for license in assets/fonts/*LICENSE*.txt; do install -Dm644 \"$license\" /app/share/licenses/suiza/$(basename \"$license\"); done"
     ],

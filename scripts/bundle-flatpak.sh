@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-version=${1:-0.1.0-alpha.2}
+version=${1:-0.1.0-alpha.3}
 app_id=io.github.cdomin1.SuizaCanvas
 scripts/prepare-flatpak-source.sh
 flatpak-builder --user --force-clean --repo=dist/flatpak-repo dist/flatpak-build packaging/flatpak/$app_id.json
