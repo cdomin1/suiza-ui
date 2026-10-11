@@ -1733,9 +1733,9 @@ impl Studio {
     fn save(&mut self) {
         if let Some(path) = self.document_path.clone().or_else(|| {
             rfd::FileDialog::new()
-                .add_filter("SUIZA Canvas document", &["suiza-ui"])
+                .add_filter("SUIZA Canvas document", &["sza"])
                 .add_filter("Legacy JSON document", &["json"])
-                .set_file_name(format!("{}.suiza-ui", self.doc.name))
+                .set_file_name(format!("{}.sza", self.doc.name))
                 .save_file()
         }) {
             if let Err(e) = self.save_to_path(path) {
@@ -1764,7 +1764,7 @@ impl Studio {
     }
     fn open(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("SUIZA Canvas document", &["suiza-ui"])
+            .add_filter("SUIZA Canvas documents", &["sza", "suiza-ui"])
             .add_filter("Legacy JSON document", &["json"])
             .pick_file()
         {
@@ -3522,13 +3522,10 @@ impl eframe::App for Studio {
                 .filter_map(|f| f.path.clone())
                 .collect::<Vec<_>>()
         }) {
-            if path
-                .extension()
-                .is_some_and(|e| e == "suiza-ui" || e == "json")
-            {
+            if document_file::is_supported(&path) {
                 self.open_path(path);
             } else {
-                self.status = "Drop a .suiza-ui or JSON document to open it".into();
+                self.status = "Drop a .sza, .suiza-ui or JSON document to open it".into();
             }
         }
         self.apply_theme(ctx);
@@ -7752,10 +7749,7 @@ fn main() -> eframe::Result {
                 studio.welcome = true;
             }
             for path in std::env::args_os().skip(1).map(std::path::PathBuf::from) {
-                if path
-                    .extension()
-                    .is_some_and(|e| e == "suiza-ui" || e == "json")
-                {
+                if document_file::is_supported(&path) {
                     studio.open_path(path);
                 }
             }
@@ -7777,7 +7771,7 @@ mod tests {
     #[test]
     fn native_document_save_close_reopen_and_failed_open_preserve_work() {
         let path =
-            std::env::temp_dir().join(format!("suiza-native-save-{}.suiza-ui", std::process::id()));
+            std::env::temp_dir().join(format!("suiza-native-save-{}.sza", std::process::id()));
         let mut app = Studio::default();
         app.doc.pages[0].artboards[0].name = "Saved native frame".into();
         app.doc.pages[0].artboards[0].layers[1].label = Some("Saved native label".into());
@@ -7790,7 +7784,7 @@ mod tests {
         assert_eq!(app.document_path.as_ref(), Some(&path));
         assert_eq!(app.recent.first(), Some(&path));
         let old_path = app.document_path.clone();
-        let damaged = path.with_extension("broken.suiza-ui");
+        let damaged = path.with_extension("broken.sza");
         std::fs::write(&damaged, b"PKbroken").unwrap();
         app.open_path(damaged.clone());
         assert!(app.doc == expected);

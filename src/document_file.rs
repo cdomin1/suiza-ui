@@ -7,6 +7,14 @@ use std::{
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 
+pub fn is_supported(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        ["sza", "suiza-ui", "json"]
+            .iter()
+            .any(|supported| e.eq_ignore_ascii_case(supported))
+    })
+}
+
 pub fn load(path: &Path) -> Result<Document, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     if file.metadata().map_err(|e| e.to_string())?.len() > MAX_BYTES {
@@ -201,6 +209,22 @@ fn preview(doc: &Document) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sza_and_legacy_extensions_share_the_native_format() {
+        let doc = Document::default();
+        for extension in ["sza", "SZA", "suiza-ui", "json", "JSON"] {
+            let path = format!("example.{extension}");
+            assert!(is_supported(Path::new(&path)));
+            let bytes = encode(&doc, Path::new(&path)).unwrap();
+            assert!(decode(&bytes).unwrap() == doc);
+            if !extension.eq_ignore_ascii_case("json") {
+                assert!(bytes.starts_with(b"PK"));
+            }
+        }
+        for name in ["example.png", "example", "example.sza.exe"] {
+            assert!(!is_supported(Path::new(name)));
+        }
+    }
     #[test]
     fn portable_package_round_trip_preserves_images_and_rejects_damage() {
         let mut doc = Document::default();

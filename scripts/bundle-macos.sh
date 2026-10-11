@@ -25,6 +25,12 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>SUIZA Canvas</string>
 <key>CFBundleExecutable</key><string>Suiza</string>
 <key>CFBundleIdentifier</key><string>local.suiza.studio</string>
+<key>CFBundleDocumentTypes</key><array><dict>
+<key>CFBundleTypeName</key><string>SUIZA Canvas Document</string>
+<key>CFBundleTypeRole</key><string>Editor</string>
+<key>CFBundleTypeExtensions</key><array><string>sza</string><string>suiza-ui</string></array>
+<key>CFBundleTypeIconFile</key><string>Suiza.icns</string>
+</dict></array>
 <key>CFBundleIconFile</key><string>Suiza.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>

@@ -1,6 +1,6 @@
 # Native SUIZA Canvas documents
 
-New documents save as `.suiza-ui`. File > Open and Open Recent read these files directly; users do not need to unzip them. Existing JSON files remain readable and continue saving as JSON. Save As can create a native copy. Documents can also be dropped onto the editor or supplied as a command-line filename.
+New documents save as `.sza`. Existing `.suiza-ui` native packages remain readable; their internal format identifier is unchanged for compatibility. File > Open and Open Recent read these files directly; users do not need to unzip them. Existing JSON files remain readable and continue saving as JSON. Save As can create a native copy. Documents can also be dropped onto the editor or supplied as a command-line filename.
 
 Version 1 is a ZIP container with stored entries:
 
@@ -13,4 +13,4 @@ The loader checks version, geometry, image dimensions and archive size. Entries 
 
 Fonts are referenced by family and style rather than embedded. Bundled Inter is available on every platform. Missing installed font families are reported when opening a document, and their original names are retained while fallback faces render the content.
 
-Native format disk tests verify edits through save, tab close and reopen, plus damaged-file handling and embedded-image round trips. Live macOS verification also confirms Command-S saves a native package, closing its tab and reopening through File Open restores the inserted editable group and children. Finder open-file event handling and Windows installer associations remain unfinished; Linux bundles include MIME metadata for `.suiza-ui`, with installation/registration still required on the destination machine.
+Native format disk tests verify edits through save, tab close and reopen, plus damaged-file handling and embedded-image round trips. Live macOS verification also confirms Command-S saves a native package, closing its tab and reopening through File Open restores the inserted editable group and children. Finder open-file event handling and Windows installer associations remain unfinished; Linux bundles include MIME metadata for `.sza` and legacy `.suiza-ui`, with installation/registration still required on the destination machine.

@@ -42,7 +42,7 @@ Application UI typography uses bundled Inter Regular and Bold from the official 
 
 ## Checkpoint status
 
-This repository captures work in progress, not a completed release. See [the request checklist](docs/REQUEST_CHECKLIST.md) and [next-phase scope](docs/NEXT_PHASE.md). The Assets library browser and native `.suiza-ui` package format remain planned; current documents save as JSON. Hosted sharing, collaboration, and AI features need later work.
+This repository captures work in progress, not a completed release. See [the request checklist](docs/REQUEST_CHECKLIST.md) and [next-phase scope](docs/NEXT_PHASE.md). The Assets library browser and native `.sza` document package format are implemented; legacy `.suiza-ui` packages and JSON documents remain readable. Hosted sharing, collaboration, and AI features need later work.
 
 ## License
 

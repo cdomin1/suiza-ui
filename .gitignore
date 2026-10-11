@@ -12,3 +12,6 @@
 /*-recovery-*.json
 .env
 .env.*
+
+# Local SUIZA Canvas documents.
+/*.sza

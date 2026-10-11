@@ -3,6 +3,7 @@
   <mime-type type="application/x-suiza-ui">
     <comment>SUIZA Canvas document</comment>
     <sub-class-of type="application/zip"/>
+    <glob pattern="*.sza"/>
     <glob pattern="*.suiza-ui"/>
   </mime-type>
 </mime-info>

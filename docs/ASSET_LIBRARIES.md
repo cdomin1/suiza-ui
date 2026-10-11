@@ -4,7 +4,7 @@ The left pane has Layers and Assets views. Assets offers searchable, virtualized
 
 ## Supported imports
 
-- `.suiza-ui` and legacy document JSON.
+- `.sza`, legacy `.suiza-ui` and document JSON.
 - `.sketch` ZIP documents, including deflated entries. Source files remain unchanged. Pages, artboards/symbol masters, rectangles/ovals, cubic paths, solid fills, first-run typography and embedded bitmaps are converted to editable layers. Symbol instances are expanded using available local/foreign masters and direct text overrides. Nested groups are flattened to the editor's existing grouping model.
 - Figma bridge JSON (`suiza-library`, version 1). The local development plugin in `tools/figma-library-export` exports the current selection/page. Native `.fig` binary files and Figma URLs are not direct import formats. No hosted backend or API token is needed.
 

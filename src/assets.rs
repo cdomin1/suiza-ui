@@ -66,7 +66,7 @@ impl AssetsUi {
                     .clicked()
                 {
                     if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Asset libraries", &["sketch", "suiza-ui", "json"])
+                        .add_filter("Asset libraries", &["sketch", "sza", "suiza-ui", "json"])
                         .pick_file()
                     {
                         let (sender, receiver) = std::sync::mpsc::channel();

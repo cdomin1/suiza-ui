@@ -658,8 +658,8 @@ pub fn delivery(doc: &Document, path: &Path, notes: &str) -> Result<(), String> 
             zip.write_all(bytes).map_err(|e| e.to_string())
         };
         add(
-            "project.suiza-ui",
-            &crate::document_file::encode(doc, Path::new("project.suiza-ui"))?,
+            "project.sza",
+            &crate::document_file::encode(doc, Path::new("project.sza"))?,
         )?;
         add("design-notes.md", notes.as_bytes())?;
         add(
@@ -723,7 +723,7 @@ pub fn delivery(doc: &Document, path: &Path, notes: &str) -> Result<(), String> 
             )
             .map_err(|e| e.to_string())?,
         )?;
-        add("README.txt",b"SUIZA Canvas offline delivery\nOpen project.suiza-ui in SUIZA Canvas. View frames/ for PNG and SVG exports, prototypes/ for self-contained browser prototypes, design-notes.md and design-checks.json for review. Original embedded images are in assets/. Fonts are referenced, not redistributed; install the licensed fonts to edit with matching typography. No account or server is required.\n")?;
+        add("README.txt",b"SUIZA Canvas offline delivery\nOpen project.sza in SUIZA Canvas. View frames/ for PNG and SVG exports, prototypes/ for self-contained browser prototypes, design-notes.md and design-checks.json for review. Original embedded images are in assets/. Fonts are referenced, not redistributed; install the licensed fonts to edit with matching typography. No account or server is required.\n")?;
         drop(add);
         let bytes = zip.finish().map_err(|e| e.to_string())?.into_inner();
         if bytes.len() > 256 * 1024 * 1024 {
@@ -1086,7 +1086,7 @@ mod tests {
         checkpoint(&mut doc, "First").unwrap();
         doc.pages[0].artboards[0].layers[0].name = "Changed".into();
         checkpoint(&mut doc, "Second").unwrap();
-        let bytes = crate::document_file::encode(&doc, Path::new("checkpoint.suiza-ui")).unwrap();
+        let bytes = crate::document_file::encode(&doc, Path::new("checkpoint.sza")).unwrap();
         let loaded = crate::document_file::decode(&bytes).unwrap();
         assert!(loaded == doc);
         let restored = restore(&loaded, 0).unwrap();
@@ -1111,7 +1111,7 @@ mod tests {
         let bytes = original_bytes.clone();
         let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         for entry in [
-            "project.suiza-ui",
+            "project.sza",
             "design-notes.md",
             "design-checks.json",
             "frames/page-1-frame-1.svg",
@@ -1122,7 +1122,7 @@ mod tests {
             assert!(zip.by_name(entry).is_ok(), "missing {entry}");
         }
         let mut native = vec![];
-        zip.by_name("project.suiza-ui")
+        zip.by_name("project.sza")
             .unwrap()
             .read_to_end(&mut native)
             .unwrap();
