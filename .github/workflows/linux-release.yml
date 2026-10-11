@@ -1,0 +1,89 @@
+name: Linux packages
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libfuse2 patchelf desktop-file-utils xvfb x11-utils
+      - run: cargo test --locked
+      - name: Download official packaging tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl -fL --retry 3 https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -o "$RUNNER_TEMP/tools/linuxdeploy.AppImage"
+          curl -fL --retry 3 https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -o "$RUNNER_TEMP/tools/appimagetool.AppImage"
+          chmod +x "$RUNNER_TEMP/tools/"*.AppImage
+          sha256sum "$RUNNER_TEMP/tools/"*.AppImage
+      - name: Build AppImage
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          export LINUXDEPLOY="$RUNNER_TEMP/tools/linuxdeploy.AppImage"
+          export APPIMAGETOOL="$RUNNER_TEMP/tools/appimagetool.AppImage"
+          scripts/bundle-appimage.sh "${GITHUB_REF_NAME#v}"
+      - name: Check AppImage contents and launch
+        run: |
+          image=$(realpath dist/*.AppImage)
+          mkdir -p "$RUNNER_TEMP/appimage-check"
+          cd "$RUNNER_TEMP/appimage-check"
+          "$image" --appimage-extract > /dev/null
+          test -x squashfs-root/usr/bin/suiza
+          file squashfs-root/usr/bin/suiza | tee binary.txt
+          grep -q 'ELF 64-bit' binary.txt
+          timeout 20s xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 "$image" --appimage-extract-and-run > launch.log 2>&1 && result=0 || result=$?
+          cat launch.log
+          test "$result" -eq 124
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+  flatpak:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - name: Install Flatpak SDK
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08 org.freedesktop.Sdk.Extension.rust-stable//25.08
+      - name: Build Flatpak
+        run: scripts/bundle-flatpak.sh "${GITHUB_REF_NAME#v}"
+      - name: Verify bundle installs
+        run: |
+          flatpak install --user -y dist/*.flatpak
+          flatpak info --user io.github.cdomin1.SuizaCanvas
+          flatpak run --command=sh io.github.cdomin1.SuizaCanvas -c 'test -x /app/bin/suiza && test -f /app/share/applications/io.github.cdomin1.SuizaCanvas.desktop'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: dist/*.flatpak
+          if-no-files-found: error
+  publish:
+    needs: [appimage, flatpak]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish tested packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum *.AppImage *.flatpak > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --title "SUIZA Canvas ${GITHUB_REF_NAME#v} · Linux preview" --notes-file ../packaging/LINUX_RELEASE_NOTES.md *.AppImage *.flatpak SHA256SUMS

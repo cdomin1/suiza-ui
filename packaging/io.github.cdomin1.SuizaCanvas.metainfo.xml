@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.cdomin1.SuizaCanvas</id>
+  <name>SUIZA Canvas</name>
+  <summary>Create editable vector designs and offline prototypes</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description><p>A local interface and vector design editor with editable native documents, asset libraries, prototyping, design checks, content batches and portable delivery packages.</p></description>
+  <launchable type="desktop-id">io.github.cdomin1.SuizaCanvas.desktop</launchable>
+  <url type="homepage">https://github.com/cdomin1/suiza-ui</url>
+  <url type="bugtracker">https://github.com/cdomin1/suiza-ui/issues</url>
+  <provides><binary>suiza</binary><mediatype>application/x-suiza-ui</mediatype></provides>
+  <content_rating type="oars-1.1"/>
+</component>

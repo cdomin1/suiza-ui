@@ -49,3 +49,5 @@ This repository captures work in progress, not a completed release. See [the req
 SUIZA Canvas application code is available under [MIT](LICENSE). Third-party fonts and vendored dependencies retain their own licenses; see `assets/fonts/` and `vendor/`.
 
 Creative workflows are available in the [Creative Workbench](docs/CREATIVE_WORKBENCH.md). Third-party extensions can use the initial [plugin command API](docs/PLUGINS.md), with a working manifest in `examples/plugins`.
+
+Linux **x86_64 AppImage and Flatpak** prereleases are published on the [Releases page](https://github.com/cdomin1/suiza-ui/releases). See [Linux installation/build notes](docs/LINUX_PACKAGING.md).
