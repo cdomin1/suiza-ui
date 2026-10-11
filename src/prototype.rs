@@ -924,7 +924,9 @@ mod tests {
         doc.name = "</script><script>alert('bad')</script>".into();
         let path = std::env::temp_dir().join("suiza-prototype-test.html");
         export_html(&doc, 0, &ShareSettings::default(), &path).unwrap();
-        let html = std::fs::read_to_string(&path).unwrap();
+        let html = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("\r\n", "\n");
         let json = html
             .split("const data=")
             .nth(1)
